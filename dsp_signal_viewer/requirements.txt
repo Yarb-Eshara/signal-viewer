@@ -1,0 +1,33 @@
+# Core Web Framework
+dash==2.17.1
+dash-bootstrap-components==1.6.0
+plotly==5.24.1
+
+# Numerical and Signal Processing
+numpy==1.26.4
+scipy==1.14.1
+pandas==2.2.2
+
+# Machine Learning / Deep Learning
+torch==2.4.1
+torchaudio==2.4.1
+torchvision==0.19.1
+
+# Signal Visualization and Analysis
+matplotlib==3.9.2
+seaborn==0.13.2
+
+# ECG/EEG Specific Tools
+neurokit2==0.2.7        # helpful for ECG/EEG analysis
+mne==1.8.0              # EEG/MEG analysis and visualization
+
+# Utilities
+scikit-learn==1.5.1     # for classical ML models (ECG classification, etc.)
+joblib==1.4.2           # model saving/loading
+soundfile==0.12.1       # reading/writing sound files
+librosa==0.10.2         # audio feature extraction
+
+
+jupyter==1.0.0
+notebook==7.2.2
+pytest==8.3.3
