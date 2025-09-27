@@ -44,7 +44,7 @@ layout = dbc.Container([
         ], width=4),
     ]),
     html.Br(),
-    html.H4("Upload Custom Siren Sound (optional)"),
+    html.H4("Upload Custom Car Sound (optional)"),
     dcc.Upload(
         id='upload-audio',
         children=html.Div(['Drag and Drop or ', html.A('Select a File')]),
@@ -117,26 +117,25 @@ def update_doppler(vs, d, duration, amp_model, contents, filename):
             # Estimate frequency for plot (used internally for Doppler)
             f0 = librosa.yin(s_short, fmin=100, fmax=2000, sr=sr)
             f0_valid = f0[f0 > 0]
-            f_mean = np.median(f0_valid) if len(f0_valid) > 0 else 700
+            f_mean = np.median(f0_valid) if len(f0_valid) > 0 else 250  # Adjusted for car sound
             hop_length = 512
             t_f0 = librosa.times_like(f0, sr=sr, hop_length=hop_length)
             interp_f = interp1d(t_f0, f0, kind='linear', bounds_error=False, fill_value=f_mean)
             f_inst = interp_f(np.mod(t_emit_grid - t_emit_min, period))
     
     if contents is None:
-        # Generate synthetic ambulance siren sound (constant frequency for smooth Doppler curve)
+        # Generate synthetic car engine sound
         num_samples_emit = int(sr * (t_emit_max - t_emit_min)) + 1
         t_emit_grid = np.linspace(t_emit_min, t_emit_max, num_samples_emit)
         
-        f_mean = 700  # Hz
-        f_amp = 0  # Set to 0 for constant frequency (no modulation waves)
-        period_siren = 1.5  # seconds per cycle (unused with f_amp=0)
-        f_inst = f_mean + f_amp * np.sin(2 * np.pi * t_emit_grid / period_siren)
+        f_mean = 250  # Hz (typical car engine idle or low horn)
+        f_variation = 20  # Hz (random variation for engine rumble)
+        f_inst = f_mean + np.random.normal(0, f_variation / 3, len(t_emit_grid))  # Slight random fluctuation
         
-        # Generate phase and signal
+        # Generate phase and signal with noise
         dt = 1.0 / sr
         phase = np.cumsum(2 * np.pi * f_inst * dt)
-        s_emit = np.sin(phase)
+        s_emit = np.sin(phase) + 0.1 * np.random.normal(0, 1, len(phase))  # Add noise for engine texture
         s_emit /= np.max(np.abs(s_emit))  # normalize
     
     # Interpolator for source signal
