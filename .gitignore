@@ -1,2 +1,3 @@
 venv
-data\ptb-diagnostic-ecg-database-1.0.0
+/data/ptb-diagnostic-ecg-database-1.0.0/
+
