@@ -61,7 +61,7 @@ layout = dbc.Container([
         justify="center"
     ),
 
-    # --- Controls ---
+    # --- Controls Row ---
     dbc.Row([
         dbc.Col([
             html.Label("Select Channels"),
@@ -73,8 +73,20 @@ layout = dbc.Container([
                 clearable=False,
                 style={"color": "#182940"}
             ),
-        ], width=10),
+        ], width=6),
+
         dbc.Col([
+            html.Label("Line Thickness"),
+            dcc.Slider(
+                id="line-width-slider",
+                min=0.5, max=5, step=0.5, value=1.5,
+                marks={i: str(i) for i in range(1, 6)},
+                tooltip={"always_visible": False}
+            ),
+        ], width=3),
+
+        dbc.Col([
+            html.Label(" "),
             dbc.Button(
                 "▶ Start",
                 id="start-stop-btn",
@@ -84,16 +96,19 @@ layout = dbc.Container([
                     "borderColor": "#3E9AAB",
                     "color": "white",
                     "fontSize": "14px",
-                    "height": "38px",      # align with dropdown
+                    "height": "38px",
                     "padding": "0 15px",
-                    "marginTop": "23px"    # slightly lower to align vertically
+                    "marginTop": "5px",
+                    "display": "block"
                 }
             ),
             html.Div(id="timer-display", className="mt-2", style={"fontWeight": "bold"})
-        ], width=2),
-    ]),
+        ], width=3),
+    ], align="center", className="mb-4"),
 
     html.Br(),
+
+    # --- Graph ---
     dcc.Graph(id="ecg-graph", style={"height": "900px"}),
 
     dcc.Interval(id="interval", interval=1000, n_intervals=0, disabled=True),
@@ -147,24 +162,12 @@ def load_csv(contents, filename):
 )
 def toggle_run(n_clicks, is_running, start_time):
     if not is_running:
-        style = {
-            "backgroundColor": "#d9534f",
-            "borderColor": "#d9534f",
-            "color": "white",
-            "height": "38px",
-            "padding": "0 15px",
-            "marginTop": "23px"
-        }  # red Stop aligned
+        style = {"backgroundColor": "#d9534f", "borderColor": "#d9534f", "color": "white",
+                 "height": "38px", "padding": "0 15px", "marginTop": "5px", "display": "block"}
         return True, False, "⏸ Stop", style, pytime.time()
     else:
-        style = {
-            "backgroundColor": "#3E9AAB",
-            "borderColor": "#3E9AAB",
-            "color": "white",
-            "height": "38px",
-            "padding": "0 15px",
-            "marginTop": "23px"
-        }  # teal Start aligned
+        style = {"backgroundColor": "#3E9AAB", "borderColor": "#3E9AAB", "color": "white",
+                 "height": "38px", "padding": "0 15px", "marginTop": "5px", "display": "block"}
         return False, True, "▶ Start", style, start_time
 
 
@@ -202,12 +205,13 @@ def set_active_button(n_reg, n_pol, n_rec, current_type):
     Output("timer-display", "children"),
     Input("interval", "n_intervals"),
     State("channel-select", "value"),
+    State("line-width-slider", "value"),
     State("start-time", "data"),
     State("is-running", "data"),
     State("ecg-data", "data"),
     State("active-graph-type", "data")
 )
-def update_live(n, selected_channels, start_time, is_running, data_json, graph_type):
+def update_live(n, selected_channels, line_width, start_time, is_running, data_json, graph_type):
     if data_json is None or not selected_channels:
         fig = go.Figure()
         fig.update_layout(
@@ -236,26 +240,60 @@ def update_live(n, selected_channels, start_time, is_running, data_json, graph_t
             y = df[ch].iloc[start_idx:end_idx:DOWNSAMPLE]
             x = t_window[::DOWNSAMPLE]
             fig.add_trace(
-                go.Scatter(x=x, y=y, mode="lines", line=dict(color="blue", width=1), name=ch.upper(), showlegend=False),
+                go.Scatter(x=x, y=y, mode="lines",
+                           line=dict(color="blue", width=line_width),
+                           name=ch.upper(), showlegend=False),
                 row=i+1, col=1
             )
-        fig.update_layout(height=250 * len(selected_channels), template="plotly_white",
-                          margin=dict(l=30, r=30, t=30, b=30),
-                          plot_bgcolor="white", paper_bgcolor="white")
+        for i in range(len(selected_channels)):
+            fig.update_xaxes(row=i+1, col=1, tickfont=dict(size=9, color="black"))
+            fig.update_yaxes(row=i+1, col=1, tickfont=dict(size=9, color="black"),
+                             title_standoff=50)
+
+        fig.update_layout(
+            height=250 * len(selected_channels),
+            template="plotly_white",
+            margin=dict(l=60, r=40, t=100, b=40),
+            plot_bgcolor="white", paper_bgcolor="white"
+        )
 
     elif graph_type == "polar":
-        fig = go.Figure()
-        for ch in selected_channels:
-            y = df[ch].iloc[start_idx:end_idx:DOWNSAMPLE]
-            theta = np.linspace(0, 360, len(y))
-            fig.add_trace(go.Scatterpolar(r=y, theta=theta, mode="lines", name=ch.upper()))
-        fig.update_layout(polar=dict(radialaxis=dict(visible=True)), showlegend=True)
+        rows = len(selected_channels)
+        specs = [[{"type": "polar"}] for _ in range(rows)]
+        fig = make_subplots(rows=rows, cols=1,
+                            subplot_titles=[f"{ch.upper()}<br><br>" for ch in selected_channels],
+                            specs=specs)
+        for ann in fig['layout']['annotations']:
+             ann['y'] += 0.01   # move titles higher (increase for more space)
+
+        for i, ch in enumerate(selected_channels):
+            y = df[ch].iloc[start_idx:end_idx:DOWNSAMPLE].to_numpy()
+            theta = np.linspace(0, 360, len(y), endpoint=False)
+            fig.add_trace(
+                go.Scatterpolar(r=y, theta=theta, mode="lines",
+                                line=dict(color="blue", width=line_width),
+                                name=ch.upper(), showlegend=False),
+                row=i+1, col=1
+            )
+
+        fig.update_layout(
+            height=400 * len(selected_channels),
+            margin=dict(l=60, r=40, t=100, b=40),
+            polar=dict(
+                angularaxis=dict(rotation=0, direction="counterclockwise", tickfont=dict(size=9)),
+                radialaxis=dict(angle=0, tickfont=dict(size=9))
+            ),
+            title=dict(
+            y=0.98 # shift all subplot titles down a bit
+        )
+        )
 
     elif graph_type == "recurrence":
         segment = df[selected_channels[0]].iloc[start_idx:end_idx:DOWNSAMPLE]
         dist = np.abs(np.subtract.outer(segment, segment))
         fig = go.Figure(data=go.Heatmap(z=dist))
         fig.update_layout(title="Recurrence Plot", template="plotly_white")
+
     else:
         fig = go.Figure()
 
