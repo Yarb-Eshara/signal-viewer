@@ -1,0 +1,21 @@
+/* Make the dropdown menu dark */
+.dark-dropdown .Select-menu-outer {
+    background-color: #1e2130 !important;
+    color: white !important;
+}
+
+/* Make the options text white */
+.dark-dropdown .Select-option {
+    color: white !important;
+}
+
+/* Highlighted option */
+.dark-dropdown .Select-option.is-focused {
+    background-color: #2d3748 !important;
+}
+
+/* Selected option */
+.dark-dropdown .Select-option.is-selected {
+    background-color: #00D2FF !important;
+    color: black !important;
+}

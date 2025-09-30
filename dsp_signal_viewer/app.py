@@ -17,7 +17,8 @@ navbar = dbc.Navbar(
             dbc.NavItem(dbc.NavLink("ECG", href="/ecg")),
             dbc.NavItem(dbc.NavLink("EEG", href="/eeg")),
             dbc.NavItem(dbc.NavLink("Sound Doppler", href="/sound-doppler")),
-            dbc.NavItem(dbc.NavLink("Sound Machines", href="/sound-machines")),
+            dbc.NavItem(dbc.NavLink("Drone", href="/drone")),
+            dbc.NavItem(dbc.NavLink("SAR", href="/sar")),
         ], className="ms-auto", navbar=True),
     ]),
     dark=True,
@@ -41,4 +42,5 @@ app.layout = html.Div(
 )
 
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    # app.run_server(debug=True)
+    app.run(debug=True)
