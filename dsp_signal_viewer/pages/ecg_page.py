@@ -289,10 +289,91 @@ def update_live(n, selected_channels, line_width, start_time, is_running, data_j
         )
 
     elif graph_type == "recurrence":
-        segment = df[selected_channels[0]].iloc[start_idx:end_idx:DOWNSAMPLE]
-        dist = np.abs(np.subtract.outer(segment, segment))
-        fig = go.Figure(data=go.Heatmap(z=dist))
-        fig.update_layout(title="Recurrence Plot", template="plotly_white")
+        # --- Blue Heatmap Recurrence Plots ---
+        if len(selected_channels) == 1:
+            ch = selected_channels[0]
+            s = df[ch].iloc[start_idx:end_idx:DOWNSAMPLE].to_numpy()
+            dist = np.abs(np.subtract.outer(s, s))
+
+            fig = go.Figure(data=go.Heatmap(z=dist, colorscale="Blues"))
+            fig.update_layout(
+                title=f"Recurrence Plot: {ch.upper()}",
+                xaxis_title="Time Index",
+                yaxis_title="Time Index",
+                height=500,
+                template="plotly_white"
+            )
+
+        elif len(selected_channels) == 2:
+            ch1, ch2 = selected_channels
+            s1 = df[ch1].iloc[start_idx:end_idx:DOWNSAMPLE].to_numpy()
+            s2 = df[ch2].iloc[start_idx:end_idx:DOWNSAMPLE].to_numpy()
+            dist = np.abs(np.subtract.outer(s1, s2))
+
+            fig = go.Figure(data=go.Heatmap(z=dist, colorscale="Blues"))
+            fig.update_layout(
+                title=f"Cross-Recurrence: {ch1.upper()} vs {ch2.upper()}",
+                xaxis_title=f"{ch1.upper()} Index",
+                yaxis_title=f"{ch2.upper()} Index",
+                height=500,
+                template="plotly_white"
+            )
+
+        elif len(selected_channels) == 4:
+            groupA = selected_channels[:2]
+            groupB = selected_channels[2:4]
+            sA = df[groupA].iloc[start_idx:end_idx:DOWNSAMPLE].mean(axis=1).to_numpy()
+            sB = df[groupB].iloc[start_idx:end_idx:DOWNSAMPLE].mean(axis=1).to_numpy()
+            dist = np.abs(np.subtract.outer(sA, sB))
+
+            fig = go.Figure(data=go.Heatmap(z=dist, colorscale="Blues"))
+            fig.update_layout(
+                title=f"Group Recurrence: {', '.join([g.upper() for g in groupA])} vs {', '.join([g.upper() for g in groupB])}",
+                xaxis_title="Group A Index",
+                yaxis_title="Group B Index",
+                height=500,
+                template="plotly_white"
+            )
+
+        elif len(selected_channels) == 6:
+            groupA = selected_channels[:3]
+            groupB = selected_channels[3:6]
+            sA = df[groupA].iloc[start_idx:end_idx:DOWNSAMPLE].mean(axis=1).to_numpy()
+            sB = df[groupB].iloc[start_idx:end_idx:DOWNSAMPLE].mean(axis=1).to_numpy()
+            dist = np.abs(np.subtract.outer(sA, sB))
+
+            fig = go.Figure(data=go.Heatmap(z=dist, colorscale="Blues"))
+            fig.update_layout(
+                title=f"Group Recurrence (3 vs 3): {', '.join([g.upper() for g in groupA])} vs {', '.join([g.upper() for g in groupB])}",
+                xaxis_title="Group A Index",
+                yaxis_title="Group B Index",
+                height=500,
+                template="plotly_white"
+            )
+
+        elif len(selected_channels) == 12:
+            groupA = selected_channels[:6]
+            groupB = selected_channels[6:12]
+            sA = df[groupA].iloc[start_idx:end_idx:DOWNSAMPLE].mean(axis=1).to_numpy()
+            sB = df[groupB].iloc[start_idx:end_idx:DOWNSAMPLE].mean(axis=1).to_numpy()
+            dist = np.abs(np.subtract.outer(sA, sB))
+
+            fig = go.Figure(data=go.Heatmap(z=dist, colorscale="Blues"))
+            fig.update_layout(
+                title=f"Group Recurrence (6 vs 6): {', '.join([g.upper() for g in groupA])} vs {', '.join([g.upper() for g in groupB])}",
+                xaxis_title="Group A Index",
+                yaxis_title="Group B Index",
+                height=500,
+                template="plotly_white"
+            )
+
+        else:
+            fig = go.Figure()
+            fig.update_layout(
+                title="⚠️ Please select 1, 2, 4 (2 vs 2), 6 (3 vs 3), or 12 (6 vs 6) channels",
+                template="plotly_white",
+                height=300
+            )
 
     else:
         fig = go.Figure()
