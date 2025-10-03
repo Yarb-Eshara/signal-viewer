@@ -12,10 +12,10 @@ import time as pytime
 dash.register_page(__name__, path="/ecg", name="ECG")
 
 # --- Parameters ---
-WINDOW_SIZE = 2500   # ~10s if fs=250Hz
-STEP = 250           # shift by 1s
-FS = 250             # sampling frequency
-DOWNSAMPLE = 4       # plot every 4th point (lighter)
+WINDOW_SIZE = 2500
+STEP = 250
+FS = 250
+DOWNSAMPLE = 4
 ECG_LEADS = ["i", "ii", "iii", "avr", "avl", "avf",
              "v1", "v2", "v3", "v4", "v5", "v6"]
 
@@ -73,6 +73,19 @@ layout = dbc.Container([
                 clearable=False,
                 style={"color": "#182940"}
             ),
+            html.Br(),
+            html.Label("Convert 12 → 3 Channels:"),
+            dcc.RadioItems(
+                id="convert-option",
+                options=[
+                    {"label": "None", "value": "none"},
+                    {"label": "Clinical choice (II, V1, V5)", "value": "clinical"},
+                    {"label": "Average Limb vs Chest Leads", "value": "average"}
+                ],
+                value="none",
+                inline=True,
+                inputStyle={"marginRight": "5px", "marginLeft": "10px"}
+            )
         ], width=6),
 
         dbc.Col([
@@ -199,19 +212,39 @@ def set_active_button(n_reg, n_pol, n_rec, current_type):
     return ACTIVE_STYLE, INACTIVE_STYLE, INACTIVE_STYLE, current_type
 
 
+# --- Helper: Convert 12 leads to 3 ---
+def convert_12_to_3(df, method):
+    if method == "clinical":
+        # Pick II, V1, V5 if they exist
+        picks = [ch for ch in ["ii", "v1", "v5"] if ch in df.columns]
+        return df[picks]
+    elif method == "average":
+        limb = [ch for ch in ["i", "ii", "iii", "avr", "avl", "avf"] if ch in df.columns]
+        chest = [ch for ch in ["v1", "v2", "v3", "v4", "v5", "v6"] if ch in df.columns]
+        new_df = pd.DataFrame()
+        if limb:
+            new_df["limb_avg"] = df[limb].mean(axis=1)
+        if chest:
+            new_df["chest_avg"] = df[chest].mean(axis=1)
+        return new_df
+    else:
+        return df
+
+
 # --- Update Graph + Timer ---
 @dash.callback(
     Output("ecg-graph", "figure"),
     Output("timer-display", "children"),
     Input("interval", "n_intervals"),
     State("channel-select", "value"),
+    State("convert-option", "value"),
     State("line-width-slider", "value"),
     State("start-time", "data"),
     State("is-running", "data"),
     State("ecg-data", "data"),
     State("active-graph-type", "data")
 )
-def update_live(n, selected_channels, line_width, start_time, is_running, data_json, graph_type):
+def update_live(n, selected_channels, convert_option, line_width, start_time, is_running, data_json, graph_type):
     if data_json is None or not selected_channels:
         fig = go.Figure()
         fig.update_layout(
@@ -226,11 +259,17 @@ def update_live(n, selected_channels, line_width, start_time, is_running, data_j
     df.columns = [c.lower() for c in df.columns]
     df = df[selected_channels]
 
+    # Apply 12→3 conversion if chosen
+    if convert_option != "none" and len(selected_channels) == 12:
+        df = convert_12_to_3(df, convert_option)
+        selected_channels = df.columns.tolist()
+
     total_samples = df.shape[0]
     end_idx = min(n * STEP, total_samples)
     start_idx = max(0, end_idx - WINDOW_SIZE)
     t_window = np.arange(start_idx, end_idx) / FS
 
+    # --- Regular plot ---
     if graph_type == "regular":
         fig = make_subplots(
             rows=len(selected_channels), cols=1, shared_xaxes=True,
@@ -256,37 +295,36 @@ def update_live(n, selected_channels, line_width, start_time, is_running, data_j
             margin=dict(l=60, r=40, t=100, b=40),
             plot_bgcolor="white", paper_bgcolor="white"
         )
-
     elif graph_type == "polar":
-        rows = len(selected_channels)
-        specs = [[{"type": "polar"}] for _ in range(rows)]
-        fig = make_subplots(rows=rows, cols=1,
-                            subplot_titles=[f"{ch.upper()}<br><br>" for ch in selected_channels],
-                            specs=specs)
-        for ann in fig['layout']['annotations']:
-             ann['y'] += 0.01   # move titles higher (increase for more space)
+            rows = len(selected_channels)
+            specs = [[{"type": "polar"}] for _ in range(rows)]
+            fig = make_subplots(rows=rows, cols=1,
+                                subplot_titles=[f"{ch.upper()}<br><br>" for ch in selected_channels],
+                                specs=specs)
+            for ann in fig['layout']['annotations']:
+                ann['y'] += 0.01   # move titles higher (increase for more space)
 
-        for i, ch in enumerate(selected_channels):
-            y = df[ch].iloc[start_idx:end_idx:DOWNSAMPLE].to_numpy()
-            theta = np.linspace(0, 360, len(y), endpoint=False)
-            fig.add_trace(
-                go.Scatterpolar(r=y, theta=theta, mode="lines",
-                                line=dict(color="blue", width=line_width),
-                                name=ch.upper(), showlegend=False),
-                row=i+1, col=1
+            for i, ch in enumerate(selected_channels):
+                y = df[ch].iloc[start_idx:end_idx:DOWNSAMPLE].to_numpy()
+                theta = np.linspace(0, 360, len(y), endpoint=False)
+                fig.add_trace(
+                    go.Scatterpolar(r=y, theta=theta, mode="lines",
+                                    line=dict(color="blue", width=line_width),
+                                    name=ch.upper(), showlegend=False),
+                    row=i+1, col=1
+                )
+
+            fig.update_layout(
+                height=400 * len(selected_channels),
+                margin=dict(l=60, r=40, t=100, b=40),
+                polar=dict(
+                    angularaxis=dict(rotation=0, direction="counterclockwise", tickfont=dict(size=9)),
+                    radialaxis=dict(angle=0, tickfont=dict(size=9))
+                ),
+                title=dict(
+                y=0.98 # shift all subplot titles down a bit
             )
-
-        fig.update_layout(
-            height=400 * len(selected_channels),
-            margin=dict(l=60, r=40, t=100, b=40),
-            polar=dict(
-                angularaxis=dict(rotation=0, direction="counterclockwise", tickfont=dict(size=9)),
-                radialaxis=dict(angle=0, tickfont=dict(size=9))
-            ),
-            title=dict(
-            y=0.98 # shift all subplot titles down a bit
-        )
-        )
+            )
 
     elif graph_type == "recurrence":
         # --- Blue Heatmap Recurrence Plots ---
