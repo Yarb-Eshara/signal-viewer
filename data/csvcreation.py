@@ -3,7 +3,7 @@ import pandas as pd
 import os
 
 # Path to the record (without extension)
-record_path = "data/ptb-diagnostic-ecg-database-1.0.0/patient001/s0010_re"
+record_path =  r"data\ptb-xl-a-large-publicly-availabl\ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3\records100\00000\00674_lr"
 
 # Read the record
 record = wfdb.rdrecord(record_path)

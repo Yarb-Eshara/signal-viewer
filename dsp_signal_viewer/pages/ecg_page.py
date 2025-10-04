@@ -8,6 +8,9 @@ import numpy as np
 import base64
 import io
 import time as pytime
+from keras.models import load_model
+from scipy.signal import resample
+import wfdb
 
 dash.register_page(__name__, path="/ecg", name="ECG")
 
@@ -23,6 +26,13 @@ ECG_LEADS = ["i", "ii", "iii", "avr", "avl", "avf",
 ACTIVE_STYLE = {"backgroundColor": "#2c7f91", "borderColor": "#2c7f91", "color": "white", "marginRight": "10px"}
 INACTIVE_STYLE = {"backgroundColor": "#3E9AAB", "borderColor": "#3E9AAB", "color": "white", "marginRight": "10px"}
 
+# --- Load model ---
+MODEL_PATH = r"models\model.hdf5"
+model = load_model(MODEL_PATH, compile=False)
+ABNORMALITIES = ["1dAVb", "RBBB", "LBBB", "SB", "AF", "ST"]
+THRESHOLD = 0.3
+
+# --- Layout ---
 layout = dbc.Container([
     html.H2("ECG Signal Viewer", className="text-center"),
     html.Hr(),
@@ -62,44 +72,27 @@ layout = dbc.Container([
     ),
 
     # --- Controls Row ---
-    dbc.Row([
-        dbc.Col([
-            html.Label("Select Channels"),
-            dcc.Dropdown(
-                id="channel-select",
-                options=[{"label": ch.upper(), "value": ch} for ch in ECG_LEADS],
-                value=ECG_LEADS,
-                multi=True,
-                clearable=False,
-                style={"color": "#182940"}
-            ),
-            html.Br(),
-            html.Label("Convert 12 → 3 Channels:"),
-            dcc.RadioItems(
-                id="convert-option",
-                options=[
-                    {"label": "None", "value": "none"},
-                    {"label": "Clinical choice (II, V1, V5)", "value": "clinical"},
-                    {"label": "Average Limb vs Chest Leads", "value": "average"}
-                ],
-                value="none",
-                inline=True,
-                inputStyle={"marginRight": "5px", "marginLeft": "10px"}
-            )
-        ], width=6),
+    # --- Controls Row (Aligned) ---
+# --- Controls Row (Aligned) ---
+# --- Controls Row (Channels + Start + Convert + Predict) ---
+# --- Controls Row (Channels + Start/Stop + Convert + Predict) ---
+dbc.Row([
+    # Channels selector (wider)
+    dbc.Col([
+        html.Label("Select Channels"),
+        dcc.Dropdown(
+            id="channel-select",
+            options=[{"label": ch.upper(), "value": ch} for ch in ECG_LEADS],
+            value=ECG_LEADS,
+            multi=True,
+            clearable=False,
+            style={"color": "#182940", "width": "100%"}
+        )
+    ], width=4),
 
-        dbc.Col([
-            html.Label("Line Thickness"),
-            dcc.Slider(
-                id="line-width-slider",
-                min=0.5, max=5, step=0.5, value=1.5,
-                marks={i: str(i) for i in range(1, 6)},
-                tooltip={"always_visible": False}
-            ),
-        ], width=3),
-
-        dbc.Col([
-            html.Label(" "),
+    # Start/Stop button with elapsed time under Start
+    dbc.Col([
+        html.Div([
             dbc.Button(
                 "▶ Start",
                 id="start-stop-btn",
@@ -110,19 +103,45 @@ layout = dbc.Container([
                     "color": "white",
                     "fontSize": "14px",
                     "height": "38px",
-                    "padding": "0 15px",
-                    "marginTop": "5px",
-                    "display": "block"
+                    "padding": "0 15px"
                 }
             ),
-            html.Div(id="timer-display", className="mt-2", style={"fontWeight": "bold"})
-        ], width=3),
-    ], align="center", className="mb-4"),
+            html.Div(id="timer-display", style={"fontWeight": "bold", "marginTop": "5px", "textAlign": "center"})
+        ], style={"display": "flex", "flexDirection": "column", "alignItems": "center"})
+    ], width=1),
+
+    # Convert 12→3 options
+    dbc.Col([
+        html.Label("Convert 12 → 3 Channels:"),
+        dcc.RadioItems(
+            id="convert-option",
+            options=[
+                {"label": "None", "value": "none"},
+                {"label": "Clinical choice (II, V1, V5)", "value": "clinical"},
+                {"label": "Average Limb vs Chest Leads", "value": "average"}
+            ],
+            value="none",
+            inline=True,
+            inputStyle={"marginRight": "5px", "marginLeft": "10px"},
+            style={"marginLeft": "20px"}
+        )
+    ], width=4),
+
+    # Predict button + prediction text
+    dbc.Col([
+        dbc.Button("Predict ECG", id="predict-btn", color="primary", n_clicks=0, style={"marginRight": "10px"}),
+        html.Div(id="ecg-prediction-output", style={
+            "fontWeight": "bold", "fontSize": "16px", "display": "inline-block"
+        })
+    ], width=3)
+], align="center", className="mb-4"),
+
 
     html.Br(),
-
-    # --- Graph ---
     dcc.Graph(id="ecg-graph", style={"height": "900px"}),
+
+ 
+    
 
     dcc.Interval(id="interval", interval=1000, n_intervals=0, disabled=True),
     dcc.Store(id="is-running", data=False),
@@ -131,6 +150,37 @@ layout = dbc.Container([
     dcc.Store(id="active-graph-type", data="regular")
 ], fluid=True)
 
+# --- Run prediction on button click ---
+# --- Run prediction on button click ---
+@dash.callback(
+    Output("ecg-prediction-output", "children"),
+    Input("predict-btn", "n_clicks"),
+    State("ecg-data", "data"),
+    State("convert-option", "value"),
+    State("channel-select", "value"),
+    prevent_initial_call=True
+)
+def predict_ecg(n_clicks, data_json, convert_option, selected_channels):
+    if data_json is None or not selected_channels:
+        return "⚠️ No ECG data or channels selected."
+    
+    df = pd.read_json(data_json, orient="split")
+    df.columns = [c.lower() for c in df.columns]
+    
+    # Apply 12→3 channel conversion if selected
+    if convert_option != "none" and len(selected_channels) == 12:
+        df = convert_12_to_3(df, convert_option)
+        selected_channels = df.columns.tolist()
+    
+    # Keep only selected channels
+    df = df[selected_channels]
+
+    try:
+        result_text = run_ecg_prediction(df)
+    except Exception as e:
+        result_text = f"⚠️ Prediction failed: {e}"
+
+    return result_text
 
 # --- CSV Upload callback ---
 @dash.callback(
@@ -215,7 +265,6 @@ def set_active_button(n_reg, n_pol, n_rec, current_type):
 # --- Helper: Convert 12 leads to 3 ---
 def convert_12_to_3(df, method):
     if method == "clinical":
-        # Pick II, V1, V5 if they exist
         picks = [ch for ch in ["ii", "v1", "v5"] if ch in df.columns]
         return df[picks]
     elif method == "average":
@@ -231,6 +280,49 @@ def convert_12_to_3(df, method):
         return df
 
 
+# --- Helper: Run ECG model prediction ---
+def run_ecg_prediction(df):
+    # Ensure all 12 leads exist
+    lead_map = {"i":"I","ii":"II","iii":"III","avr":"AVR","avl":"AVL","avf":"AVF",
+                "v1":"V1","v2":"V2","v3":"V3","v4":"V4","v5":"V5","v6":"V6"}
+    df_model = pd.DataFrame()
+    for ch in lead_map:
+        df_model[lead_map[ch]] = df[ch] if ch in df.columns else 0.0
+
+    # Resample to 4096
+    target_length = 4096
+    num_samples = df_model.shape[0]
+    if num_samples != target_length:
+        df_resampled = resample(df_model.to_numpy(), target_length, axis=0)
+    else:
+        df_resampled = df_model.to_numpy()
+
+    # Normalize
+    df_norm = (df_resampled - np.mean(df_resampled, axis=0)) / (np.std(df_resampled, axis=0) + 1e-8)
+    input_tensor = np.expand_dims(df_norm, axis=0)
+
+    # Predict
+    pred = model.predict(input_tensor)[0]
+    detected = [(ab, p) for ab, p in zip(ABNORMALITIES, pred) if p >= THRESHOLD]
+
+    if len(detected) == 0:
+        return " Normal (no significant abnormality detected)"
+    else:
+        diseases = [ab for ab, _ in detected]
+        return f" Abnormal: Detected conditions → {', '.join(diseases)}"
+
+
+# --- Update Prediction on CSV upload ---
+
+def update_prediction(data_json):
+    if data_json is None:
+        return ""
+    df = pd.read_json(data_json, orient="split")
+    df.columns = [c.lower() for c in df.columns]
+    result_text = run_ecg_prediction(df)
+    return result_text
+
+
 # --- Update Graph + Timer ---
 @dash.callback(
     Output("ecg-graph", "figure"),
@@ -238,13 +330,13 @@ def convert_12_to_3(df, method):
     Input("interval", "n_intervals"),
     State("channel-select", "value"),
     State("convert-option", "value"),
-    State("line-width-slider", "value"),
     State("start-time", "data"),
     State("is-running", "data"),
     State("ecg-data", "data"),
     State("active-graph-type", "data")
 )
-def update_live(n, selected_channels, convert_option, line_width, start_time, is_running, data_json, graph_type):
+def update_live(n, selected_channels, convert_option, start_time, is_running, data_json, graph_type):
+    line_width = 1.5 
     if data_json is None or not selected_channels:
         fig = go.Figure()
         fig.update_layout(
@@ -259,7 +351,6 @@ def update_live(n, selected_channels, convert_option, line_width, start_time, is
     df.columns = [c.lower() for c in df.columns]
     df = df[selected_channels]
 
-    # Apply 12→3 conversion if chosen
     if convert_option != "none" and len(selected_channels) == 12:
         df = convert_12_to_3(df, convert_option)
         selected_channels = df.columns.tolist()
@@ -269,7 +360,7 @@ def update_live(n, selected_channels, convert_option, line_width, start_time, is
     start_idx = max(0, end_idx - WINDOW_SIZE)
     t_window = np.arange(start_idx, end_idx) / FS
 
-    # --- Regular plot ---
+    # Regular plot
     if graph_type == "regular":
         fig = make_subplots(
             rows=len(selected_channels), cols=1, shared_xaxes=True,
@@ -288,7 +379,6 @@ def update_live(n, selected_channels, convert_option, line_width, start_time, is
             fig.update_xaxes(row=i+1, col=1, tickfont=dict(size=9, color="black"))
             fig.update_yaxes(row=i+1, col=1, tickfont=dict(size=9, color="black"),
                              title_standoff=50)
-
         fig.update_layout(
             height=250 * len(selected_channels),
             template="plotly_white",
