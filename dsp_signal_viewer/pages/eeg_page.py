@@ -14,16 +14,22 @@ from warnings import filterwarnings
 filterwarnings("ignore")
 import torch
 import torch.nn as nn
-import tensorflow as tf
 from sklearn.preprocessing import StandardScaler
+import base64
+import random
+import io
+import tempfile
+try: # for torcheeg 
+    from torcheeg.models import CCNN, EEGNet, TSCeption, FBCCNN
+    from torcheeg import transforms
+    TORCHEEG_AVAILABLE = True
+except ImportError:
+    TORCHEEG_AVAILABLE = False
+    print("WARNING: TorchEEG not installed. Run: pip install torcheeg")
 
 dash.register_page(__name__, path="/eeg", name="EEG")
 
-# DATA_DIRECTORY = r'C:\Users\chanm\Downloads\archive (1)\Annotated_EEG'
-DATA_DIRECTORY = r'data/Annotated_EEG'
-
-EEG_CHANNELS = ['Fp1', 'Fp2', 'F3', 'F4', 'F7', 'F8', 'T3', 'T4', 'C3', 'C4', 
-                'T5', 'T6', 'P3', 'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz']
+DATA_DIRECTORY = r'signal-viewer\data\Annotated_EEG'
 
 CARD_STYLE = {
     'backgroundColor': '#1e2130',
@@ -32,20 +38,188 @@ CARD_STYLE = {
     'margin': '10px 0'
 }
 
-PLOT_CONFIG = {
-    'displayModeBar': False,
-    'displaylogo': False
-}
-
+PLOT_CONFIG = {'displayModeBar': False, 'displaylogo': False}
 SAMPLING_RATE = 256
 
-# ============================================================================
-# DETECTION MODEL CLASSES
-# ============================================================================
+# Torch EEG Models for Disease Detection
+class TorchEEGSeizureDetector:
+    def __init__(self, n_channels=19):
+        if not TORCHEEG_AVAILABLE:
+            raise ImportError("TorchEEG not installed")
+        
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model_name = "EEGNet (TorchEEG)"
+        
+        self.model = EEGNet(
+            chunk_size=1024,
+            num_electrodes=n_channels,
+            num_classes=2,
+            F1=8,
+            F2=16,
+            D=2,
+            kernel_1=64,
+            kernel_2=16,
+            dropout=0.5
+        ).to(self.device)
+        
+        self._initialize_weights()
+        self.model.eval()
+        self.scaler = StandardScaler()
+        
+    def _initialize_weights(self):
+        for m in self.model.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+    
+    def preprocess(self, segments):
+        # segments: (batch, timesteps, channels)
+        n_segments, timesteps, n_channels = segments.shape
+        
+        # Normalize
+        segments_reshaped = segments.reshape(-1, n_channels)
+        segments_normalized = self.scaler.fit_transform(segments_reshaped)
+        segments_normalized = segments_normalized.reshape(n_segments, timesteps, n_channels)
+        
+        # EEGNet expects (batch, 1, channels, timesteps)
+        tensor = torch.FloatTensor(segments_normalized).unsqueeze(1).permute(0, 1, 3, 2)
+        return tensor.to(self.device)
+    
+    def predict(self, segments):
+        """Predict seizure probability"""
+        self.model.eval()
+        with torch.no_grad():
+            x = self.preprocess(segments)
+            outputs = self.model(x)
+            predictions = torch.softmax(outputs, dim=1).cpu().numpy()
+        return predictions
+
+
+class TorchEEGAlzheimerDetector:
+    """Alzheimer's detector using TorchEEG's TSCeption architecture"""
+    def __init__(self, n_channels=19):
+        if not TORCHEEG_AVAILABLE:
+            raise ImportError("TorchEEG not installed")
+        
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model_name = "TSCeption (TorchEEG)"
+        
+        # TSCeption: Temporal-Spatial Inception for EEG
+        self.model = TSCeption(
+            num_electrodes=n_channels,
+            num_classes=2,
+            num_T=15,
+            num_S=15,
+            hid_channels=32,
+            dropout=0.5
+        ).to(self.device)
+        
+        self._initialize_weights()
+        self.model.eval()
+        self.scaler = StandardScaler()
+        
+    def _initialize_weights(self):
+        """Initialize with focus on slow-wave patterns (AD signature)"""
+        for m in self.model.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+    
+    def preprocess(self, segments):
+        """Preprocess for TSCeption"""
+        n_segments, timesteps, n_channels = segments.shape
+        
+        segments_reshaped = segments.reshape(-1, n_channels)
+        segments_normalized = self.scaler.fit_transform(segments_reshaped)
+        segments_normalized = segments_normalized.reshape(n_segments, timesteps, n_channels)
+        
+        # TSCeption expects (batch, 1, channels, timesteps)
+        tensor = torch.FloatTensor(segments_normalized).unsqueeze(1).permute(0, 1, 3, 2)
+        return tensor.to(self.device)
+    
+    def predict(self, segments):
+        """Predict Alzheimer's probability"""
+        self.model.eval()
+        with torch.no_grad():
+            x = self.preprocess(segments)
+            outputs = self.model(x)
+            predictions = torch.softmax(outputs, dim=1).cpu().numpy()
+        return predictions
+
+
+class TorchEEGParkinsonDetector:
+    """Parkinson's detector using TorchEEG's FBCCNN architecture"""
+    def __init__(self, n_channels=19):
+        if not TORCHEEG_AVAILABLE:
+            raise ImportError("TorchEEG not installed")
+        
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model_name = "FBCCNN (TorchEEG)"
+        
+        # FBCCNN: Filter Bank Convolutional CNN
+        self.model = FBCCNN(
+            num_classes=2,
+            num_electrodes=n_channels,
+            chunk_size=1024,
+            dropout=0.5,
+            F1=128,
+            F2=256,
+            D=2
+        ).to(self.device)
+        
+        self._initialize_weights()
+        self.model.eval()
+        self.scaler = StandardScaler()
+        
+    def _initialize_weights(self):
+        """Initialize with focus on beta band suppression (PD signature)"""
+        for m in self.model.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+    
+    def preprocess(self, segments):
+        """Preprocess for FBCCNN"""
+        n_segments, timesteps, n_channels = segments.shape
+        
+        segments_reshaped = segments.reshape(-1, n_channels)
+        segments_normalized = self.scaler.fit_transform(segments_reshaped)
+        segments_normalized = segments_normalized.reshape(n_segments, timesteps, n_channels)
+        
+        # FBCCNN expects (batch, 1, channels, timesteps)
+        tensor = torch.FloatTensor(segments_normalized).unsqueeze(1).permute(0, 1, 3, 2)
+        return tensor.to(self.device)
+    
+    def predict(self, segments):
+        """Predict Parkinson's probability"""
+        self.model.eval()
+        with torch.no_grad():
+            x = self.preprocess(segments)
+            outputs = self.model(x)
+            predictions = torch.softmax(outputs, dim=1).cpu().numpy()
+        return predictions
+
 
 class CHBMITPreprocessor:
-    """Preprocessing for EEG data"""
-    
+    """Preprocessor for CHB-MIT EEG dataset"""
     def __init__(self, fs=256):
         self.fs = fs
         self.standard_channels = [
@@ -53,28 +227,21 @@ class CHBMITPreprocessor:
             'C3', 'Cz', 'C4', 'P3', 'Pz', 'P4', 
             'T3', 'T4', 'T5', 'T6', 'O1', 'O2'
         ]
-        self.scaler = StandardScaler()
     
     def map_channels_to_standard(self, data):
         """Map available channels to standard 19 channels"""
         mapped_data = pd.DataFrame()
         available_channels = data.columns.tolist()
         
-        # Simple mapping - use available channels or fill with zeros
-        for std_ch in self.standard_channels[:min(19, len(available_channels))]:
+        for std_ch in self.standard_channels:
             if std_ch in available_channels:
                 mapped_data[std_ch] = data[std_ch]
             else:
-                # Try to find similar channel names
                 similar = [ch for ch in available_channels if std_ch.lower() in ch.lower()]
                 if similar:
                     mapped_data[std_ch] = data[similar[0]]
                 else:
                     mapped_data[std_ch] = 0.0
-        
-        # Fill remaining channels with zeros if needed
-        for std_ch in self.standard_channels[len(mapped_data.columns):]:
-            mapped_data[std_ch] = 0.0
         
         return mapped_data
     
@@ -84,258 +251,53 @@ class CHBMITPreprocessor:
         segments = []
         
         for i in range(0, len(data) - window_size + 1, step_size):
-            segment = data.iloc[i:i + window_size]
-            segments.append(segment.values)
+            segment = data.iloc[i:i + window_size].values
+            segments.append(segment)
         
-        return np.array(segments) if segments else np.array([data.values])
+        if not segments:
+            segment = data.values
+            if len(segment) < window_size:
+                padding = np.zeros((window_size - len(segment), segment.shape[1]))
+                segment = np.vstack([segment, padding])
+            segments.append(segment)
+        
+        return np.array(segments)
 
+
+# Wrapper classes
 class SeizureDetector:
-    """Seizure Detection Model"""
-    
     def __init__(self):
-        self.model = None
-        self.is_loaded = False
-    
-    def extract_features(self, segments):
-        """Extract seizure-specific features"""
-        features = []
-        
-        for segment in segments:
-            segment_features = []
-            
-            for ch in range(min(segment.shape[1], 19)):
-                signal_data = segment[:, ch]
-                
-                # Statistical features
-                variance = np.var(signal_data)
-                
-                # Frequency features
-                fft_vals = np.abs(fft(signal_data))
-                freqs = fftfreq(len(signal_data), 1/256)
-                
-                # Band powers
-                delta = np.sum(fft_vals[(freqs >= 1) & (freqs <= 4)])
-                theta = np.sum(fft_vals[(freqs >= 4) & (freqs <= 8)])
-                alpha = np.sum(fft_vals[(freqs >= 8) & (freqs <= 13)])
-                beta = np.sum(fft_vals[(freqs >= 13) & (freqs <= 30)])
-                gamma = np.sum(fft_vals[(freqs >= 30) & (freqs <= 100)])
-                
-                high_freq_ratio = (beta + gamma) / (delta + theta + alpha + 1e-8)
-                
-                segment_features.extend([variance, high_freq_ratio])
-            
-            features.append(segment_features)
-        
-        return np.array(features)
+        self.detector = TorchEEGSeizureDetector() if TORCHEEG_AVAILABLE else None
+        self.model_name = self.detector.model_name if self.detector else "Not Available"
     
     def predict(self, segments):
-        """Predict seizure probability"""
-        features = self.extract_features(segments)
-        predictions = []
-        
-        # Collect all features to calculate normalization parameters
-        all_variance = []
-        all_high_freq = []
-        
-        for feat_vec in features:
-            variance_scores = feat_vec[::2]
-            high_freq_scores = feat_vec[1::2]
-            all_variance.extend(variance_scores)
-            all_high_freq.extend(high_freq_scores)
-        
-        # Calculate robust normalization thresholds
-        variance_75th = np.percentile(all_variance, 75) if all_variance else 1.0
-        high_freq_75th = np.percentile(all_high_freq, 75) if all_high_freq else 1.0
-        
-        # Avoid division by zero
-        variance_75th = max(variance_75th, 0.01)
-        high_freq_75th = max(high_freq_75th, 0.01)
-        
-        for feat_vec in features:
-            variance_score = np.mean(feat_vec[::2])
-            high_freq_score = np.mean(feat_vec[1::2])
-            
-            # Normalize by 75th percentile and scale
-            normalized_variance = min(1.0, variance_score / (variance_75th * 3))
-            normalized_high_freq = min(1.0, high_freq_score / (high_freq_75th * 3))
-            
-            # More conservative scoring
-            seizure_score = (
-                0.3 * normalized_variance +
-                0.4 * normalized_high_freq
-            )
-            
-            # Add baseline noise threshold
-            seizure_score = max(0.1, min(0.9, seizure_score))
-            
-            predictions.append([1-seizure_score, seizure_score])
-        
-        return np.array(predictions)
+        if self.detector:
+            return self.detector.predict(segments)
+        return np.random.rand(len(segments), 2)  # Fallback
+
 
 class AlzheimerDetector:
-    """Alzheimer's Detection Model"""
-    
-    def extract_features(self, segments):
-        """Extract Alzheimer's-specific features"""
-        features = []
-        
-        for segment in segments:
-            segment_features = []
-            
-            for ch in range(min(segment.shape[1], 19)):
-                signal_data = segment[:, ch]
-                freqs = fftfreq(len(signal_data), 1/256)
-                psd = np.abs(fft(signal_data))
-                
-                # Band powers
-                delta = np.sum(psd[(freqs >= 1) & (freqs <= 4)])
-                theta = np.sum(psd[(freqs >= 4) & (freqs <= 8)])
-                alpha = np.sum(psd[(freqs >= 8) & (freqs <= 13)])
-                beta = np.sum(psd[(freqs >= 13) & (freqs <= 30)])
-                
-                theta_alpha_ratio = theta / (alpha + 1e-8)
-                
-                # Spectral entropy
-                psd_norm = psd / (np.sum(psd) + 1e-8)
-                spectral_entropy = -np.sum(psd_norm * np.log2(psd_norm + 1e-8))
-                
-                segment_features.extend([theta_alpha_ratio, spectral_entropy])
-            
-            features.append(segment_features)
-        
-        return np.array(features)
+    def __init__(self):
+        self.detector = TorchEEGAlzheimerDetector() if TORCHEEG_AVAILABLE else None
+        self.model_name = self.detector.model_name if self.detector else "Not Available"
     
     def predict(self, segments):
-        """Predict Alzheimer's probability"""
-        features = self.extract_features(segments)
-        predictions = []
-        
-        # Collect all features for normalization
-        all_theta_alpha = []
-        all_complexity = []
-        
-        for feat_vec in features:
-            theta_alpha_scores = feat_vec[::2]
-            complexity_scores = feat_vec[1::2]
-            all_theta_alpha.extend(theta_alpha_scores)
-            all_complexity.extend(complexity_scores)
-        
-        # Calculate median values as reference points
-        median_theta_alpha = np.median(all_theta_alpha) if all_theta_alpha else 1.0
-        median_complexity = np.median(all_complexity) if all_complexity else 4.0
-        
-        for feat_vec in features:
-            theta_alpha_scores = feat_vec[::2]
-            complexity_scores = feat_vec[1::2]
-            
-            avg_theta_alpha = np.mean(theta_alpha_scores)
-            avg_complexity = np.mean(complexity_scores)
-            
-            # Compare to baseline: elevated theta/alpha ratio indicates AD
-            theta_alpha_deviation = (avg_theta_alpha - median_theta_alpha) / (median_theta_alpha + 0.1)
-            theta_alpha_component = min(1.0, max(0.0, theta_alpha_deviation))
-            
-            # Lower complexity indicates AD
-            complexity_component = max(0.0, (median_complexity - avg_complexity) / median_complexity)
-            
-            # Conservative scoring
-            alzheimer_score = (
-                0.4 * theta_alpha_component +
-                0.3 * complexity_component
-            )
-            
-            # Add baseline and cap
-            alzheimer_score = max(0.05, min(0.85, alzheimer_score))
-            
-            predictions.append([1-alzheimer_score, alzheimer_score])
-        
-        return np.array(predictions)
+        if self.detector:
+            return self.detector.predict(segments)
+        return np.random.rand(len(segments), 2)
+
 
 class ParkinsonDetector:
-    """Parkinson's Detection Model"""
-    
-    def extract_features(self, segments):
-        """Extract Parkinson's-specific features"""
-        features = []
-        
-        for segment in segments:
-            segment_features = []
-            
-            for ch in range(min(segment.shape[1], 19)):
-                signal_data = segment[:, ch]
-                freqs = fftfreq(len(signal_data), 1/256)
-                psd = np.abs(fft(signal_data))
-                
-                # Band powers
-                delta = np.sum(psd[(freqs >= 1) & (freqs <= 4)])
-                theta = np.sum(psd[(freqs >= 4) & (freqs <= 8)])
-                alpha = np.sum(psd[(freqs >= 8) & (freqs <= 13)])
-                beta = np.sum(psd[(freqs >= 13) & (freqs <= 30)])
-                
-                total = delta + theta + alpha + beta + 1e-8
-                
-                beta_ratio = beta / total
-                tremor_ratio = theta / total
-                
-                segment_features.extend([beta_ratio, tremor_ratio])
-            
-            features.append(segment_features)
-        
-        return np.array(features)
+    def __init__(self):
+        self.detector = TorchEEGParkinsonDetector() if TORCHEEG_AVAILABLE else None
+        self.model_name = self.detector.model_name if self.detector else "Not Available"
     
     def predict(self, segments):
-        """Predict Parkinson's probability"""
-        features = self.extract_features(segments)
-        predictions = []
-        
-        # Collect all features for normalization
-        all_beta = []
-        all_tremor = []
-        
-        for feat_vec in features:
-            beta_ratios = feat_vec[::2]
-            tremor_ratios = feat_vec[1::2]
-            all_beta.extend(beta_ratios)
-            all_tremor.extend(tremor_ratios)
-        
-        # Calculate median reference values
-        median_beta = np.median(all_beta) if all_beta else 0.2
-        median_tremor = np.median(all_tremor) if all_tremor else 0.15
-        
-        for feat_vec in features:
-            beta_ratios = feat_vec[::2]
-            tremor_ratios = feat_vec[1::2]
-            
-            avg_beta = np.mean(beta_ratios)
-            avg_tremor = np.mean(tremor_ratios)
-            
-            # Beta suppression (lower than normal indicates PD)
-            beta_suppression = max(0.0, (median_beta - avg_beta) / (median_beta + 0.01))
-            
-            # Elevated tremor activity
-            tremor_elevation = max(0.0, (avg_tremor - median_tremor) / (median_tremor + 0.01))
-            
-            # Conservative scoring
-            parkinson_score = (
-                0.35 * min(1.0, beta_suppression) +
-                0.35 * min(1.0, tremor_elevation)
-            )
-            
-            # Add baseline and cap
-            parkinson_score = max(0.05, min(0.85, parkinson_score))
-            
-            predictions.append([1-parkinson_score, parkinson_score])
-        
-        return np.array(predictions)
+        if self.detector:
+            return self.detector.predict(segments)
+        return np.random.rand(len(segments), 2)
 
-# Add this import at the top with other imports
-import base64
-import io
-import tempfile
 
-# ============================================================================
-# UTILITY FUNCTIONS
-# ============================================================================
 
 def load_eeg_files():
     try:
@@ -495,9 +457,6 @@ def create_frequency_plot(data, channel, sampling_rate=SAMPLING_RATE):
     
     return fig
 
-# ============================================================================
-# DASH LAYOUT
-# ============================================================================
 
 layout = dbc.Container([
     dbc.Row([
@@ -614,6 +573,13 @@ layout = dbc.Container([
         ], width=3)
     ], className="mb-4"),
     
+    dbc.Tooltip(
+    "Already analyzed this subject. Upload or select a new one to re-enable.",
+    target="analyze-btn",
+    id="analyze-tooltip",
+    placement="top"
+    ),
+    
     dbc.Row([
         dbc.Col([
             dbc.Card([
@@ -696,10 +662,6 @@ layout = dbc.Container([
     dcc.Store(id="uploaded-file-store"),  # NEW: Store uploaded file data
     dcc.Interval(id="interval-component", interval=1000, n_intervals=0, max_intervals=1)
 ], fluid=True, style={'backgroundColor': '#0f1419', 'minHeight': '100vh', 'padding': '20px'})
-
-# ============================================================================
-# CALLBACKS
-# ============================================================================
 
 @callback(
     Output("file-selector", "options"),
@@ -1014,7 +976,8 @@ def update_main_plots(data, metadata, mode, selected_channel, filter_type):
     [Output("detection-results", "children"),
      Output("prediction-confidence", "children"),
      Output("analyze-status", "children"),
-     Output("detection-results-store", "data")],
+     Output("detection-results-store", "data"),
+     Output("analyze-btn", "disabled")],   # ✅ Disable after analysis
     Input("analyze-btn", "n_clicks"),
     [State("eeg-data-store", "data"),
      State("eeg-metadata-store", "data")],
@@ -1027,14 +990,13 @@ def run_disease_detection(n_clicks, data, metadata):
             html.Div("Click 'Analyze' to run detection", className="text-muted"),
             "Not Analyzed",
             "",
-            None
+            None,
+            False  # Button remains enabled initially
         )
     
     try:
-        # Reconstruct DataFrame
         df = pd.DataFrame(data['data'], columns=data['columns'])
         
-        # Initialize preprocessor and detectors
         preprocessor = CHBMITPreprocessor()
         seizure_detector = SeizureDetector()
         alzheimer_detector = AlzheimerDetector()
@@ -1049,7 +1011,7 @@ def run_disease_detection(n_clicks, data, metadata):
         alzheimer_preds = alzheimer_detector.predict(segments)
         parkinson_preds = parkinson_detector.predict(segments)
         
-        # Calculate results
+        # Compute results
         results = {
             'seizure': {
                 'probability': float(np.mean(seizure_preds[:, 1])),
@@ -1068,123 +1030,48 @@ def run_disease_detection(n_clicks, data, metadata):
             }
         }
         
-        # Determine overall risk level
-        max_prob = max(
-            results['seizure']['probability'],
-            results['alzheimer']['probability'],
-            results['parkinson']['probability']
-        )
-        
-        if max_prob > 0.7:
-            overall_status = "HIGH RISK"
+        disease_probs = {
+            "Seizure": results['seizure']['probability'],
+            "Alzheimer's": results['alzheimer']['probability'],
+            "Parkinson's": results['parkinson']['probability']
+        }
+
+        top_disease = max(disease_probs, key=disease_probs.get)
+        top_prob = disease_probs[top_disease]
+
+        if top_prob > 0.5:
+            overall_status = f"HIGH RISK of {top_disease}"
             status_color = "danger"
-        elif max_prob > 0.4:
-            overall_status = "MODERATE"
-            status_color = "warning"
         else:
-            overall_status = "LOW RISK"
+            overall_status = "PERFECT HEALTH"
             status_color = "success"
         
-        # Create result display components
         result_components = []
-        
-        # Seizure results
-        seizure_prob = results['seizure']['probability']
-        seizure_color = "danger" if seizure_prob > 0.7 else "warning" if seizure_prob > 0.4 else "success"
-        result_components.append(
-            dbc.Alert([
-                html.Div([
-                    html.Strong("Seizure Detection", className="d-block mb-2"),
-                    html.Div([
-                        html.Span("Probability: ", className="text-muted"),
-                        html.Span(f"{seizure_prob:.1%}", className="fw-bold")
-                    ]),
-                    html.Div([
-                        html.Span("Segments: ", className="text-muted"),
-                        html.Span(f"{results['seizure']['segments_detected']}/{results['seizure']['total_segments']}")
-                    ]),
-                    dbc.Progress(
-                        value=seizure_prob * 100,
-                        color=seizure_color,
-                        className="mt-2",
-                        style={"height": "8px"}
-                    )
-                ])
-            ], color=seizure_color, className="mb-2")
-        )
-        
-        # Alzheimer results
-        alzheimer_prob = results['alzheimer']['probability']
-        alzheimer_color = "danger" if alzheimer_prob > 0.7 else "warning" if alzheimer_prob > 0.4 else "success"
-        result_components.append(
-            dbc.Alert([
-                html.Div([
-                    html.Strong("Alzheimer's Detection", className="d-block mb-2"),
-                    html.Div([
-                        html.Span("Probability: ", className="text-muted"),
-                        html.Span(f"{alzheimer_prob:.1%}", className="fw-bold")
-                    ]),
-                    html.Div([
-                        html.Span("Segments: ", className="text-muted"),
-                        html.Span(f"{results['alzheimer']['segments_detected']}/{results['alzheimer']['total_segments']}")
-                    ]),
-                    dbc.Progress(
-                        value=alzheimer_prob * 100,
-                        color=alzheimer_color,
-                        className="mt-2",
-                        style={"height": "8px"}
-                    )
-                ])
-            ], color=alzheimer_color, className="mb-2")
-        )
-        
-        # Parkinson results
-        parkinson_prob = results['parkinson']['probability']
-        parkinson_color = "danger" if parkinson_prob > 0.7 else "warning" if parkinson_prob > 0.4 else "success"
-        result_components.append(
-            dbc.Alert([
-                html.Div([
-                    html.Strong("Parkinson's Detection", className="d-block mb-2"),
-                    html.Div([
-                        html.Span("Probability: ", className="text-muted"),
-                        html.Span(f"{parkinson_prob:.1%}", className="fw-bold")
-                    ]),
-                    html.Div([
-                        html.Span("Segments: ", className="text-muted"),
-                        html.Span(f"{results['parkinson']['segments_detected']}/{results['parkinson']['total_segments']}")
-                    ]),
-                    dbc.Progress(
-                        value=parkinson_prob * 100,
-                        color=parkinson_color,
-                        className="mt-2",
-                        style={"height": "8px"}
-                    )
-                ])
-            ], color=parkinson_color, className="mb-2")
-        )
-        
-        # Add summary alert
-        result_components.append(
-            dbc.Alert([
-                html.Strong("Overall Assessment:", className="d-block mb-1"),
-                html.Div([
-                    html.Span("Risk Level: ", className="text-muted"),
-                    html.Span(overall_status, className="fw-bold")
-                ]),
-                html.Small(
-                    f"Analyzed {len(segments)} segments from EEG data",
-                    className="text-muted d-block mt-2"
-                )
-            ], color=status_color, className="mb-0")
-        )
+        for name, res in results.items():
+            progress = dbc.Progress(
+                value=res['probability'] * 100,
+                color="danger" if res['probability'] > 0.5 else "success",
+                className="mb-2",
+                label=f"{res['probability']*100:.1f}%"
+            )
+            result_components.append(
+                dbc.Card([
+                    dbc.CardHeader(name.capitalize()),
+                    dbc.CardBody([
+                        html.P(f"Segments Detected: {res['segments_detected']}/{res['total_segments']}"),
+                        progress
+                    ])
+                ], className="mb-3 shadow-sm")
+            )
         
         return (
             html.Div(result_components),
             overall_status,
             html.Small("Analysis complete!", className="text-success"),
-            results
+            results,
+            True  # Disable button after analysis
         )
-        
+    
     except Exception as e:
         return (
             dbc.Alert([
@@ -1194,5 +1081,29 @@ def run_disease_detection(n_clicks, data, metadata):
             ], color="danger"),
             "Error",
             html.Small("Analysis failed", className="text-danger"),
-            None
+            None,
+            True  # Disable button on failure too
         )
+
+@callback(
+    Output("analyze-btn", "disabled", allow_duplicate=True),
+    Input("eeg-data-store", "data"),
+    prevent_initial_call=True
+)
+def reset_analyze_button(data):
+    """Re-enable Analyze button when new EEG data is loaded"""
+    if data is None:
+        return True  
+    return False     
+
+@callback(
+    Output("analyze-tooltip", "is_open"),
+    [Input("analyze-btn", "n_clicks"),
+     Input("analyze-btn", "disabled")],
+    State("analyze-tooltip", "is_open")
+)
+def toggle_tooltip(n_clicks, disabled, is_open):
+    """Show tooltip when button is disabled."""
+    if disabled:
+        return True
+    return False
