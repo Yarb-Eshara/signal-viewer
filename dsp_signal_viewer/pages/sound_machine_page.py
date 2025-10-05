@@ -53,9 +53,17 @@ print("Model loaded successfully!")
 # =====================
 
 
-def pad_or_repeat_audio(file_path, target_duration_sec=3, padded_folder="assets/padded_sounds"):
+def pad_or_repeat_audio(file_path, target_duration_sec=3, padded_folder=r"assets/padded_sounds"):
     # Make sure the padded folder exists
     os.makedirs(padded_folder, exist_ok=True)
+
+    # Create padded file path in the padded folder
+    base_name = os.path.basename(file_path).replace(".wav", "-padded.wav")
+    padded_file_path = os.path.join(padded_folder, base_name)
+
+    # If already exists, just return it
+    if os.path.exists(padded_file_path):
+        return padded_file_path
 
     # Read original audio
     data, sr = sf.read(file_path)
@@ -66,13 +74,10 @@ def pad_or_repeat_audio(file_path, target_duration_sec=3, padded_folder="assets/
         repeats = int(np.ceil(desired_length / len(data)))
         data = np.tile(data, repeats)[:desired_length]
 
-    # Create padded file path in the padded folder
-    base_name = os.path.basename(file_path).replace(".wav", "-padded.wav")
-    padded_file_path = os.path.join(padded_folder, base_name)
-
-    # Write padded file
+    # Write padded file once
     sf.write(padded_file_path, data, sr)
     return padded_file_path
+
 
 
 def create_waveform_plot(file_path):
@@ -93,7 +98,8 @@ def create_waveform_plot(file_path):
 # =====================
 # Predefined sounds
 # =====================
-SOUNDS_FOLDER = r"dsp_signal_viewer\assets\sounds"  # your 4 original sounds
+SOUNDS_FOLDER = r'dsp_signal_viewer\assets\sounds'
+#SOUNDS_FOLDER = r'assets/sounds'  # your 4 original sounds
 sound_files = [f for f in os.listdir(SOUNDS_FOLDER) if f.endswith(".wav")]
 
 # Only use original filenames in dropdown
