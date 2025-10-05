@@ -6,7 +6,6 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
-from scipy import signal
 from scipy.fft import fft, fftfreq
 import os
 import mne
@@ -16,20 +15,17 @@ import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 import base64
-import random
-import io
 import tempfile
-try: # for torcheeg 
+try:
     from torcheeg.models import CCNN, EEGNet, TSCeption, FBCCNN
     from torcheeg import transforms
     TORCHEEG_AVAILABLE = True
 except ImportError:
     TORCHEEG_AVAILABLE = False
-    print("WARNING: TorchEEG not installed. Run: pip install torcheeg")
 
 dash.register_page(__name__, path="/eeg", name="EEG")
 
-DATA_DIRECTORY = r'signal-viewer\data\Annotated_EEG'
+DATA_DIRECTORY = r"C:\Users\chanm\signal-viewer\data\Annotated_EEG"
 
 CARD_STYLE = {
     'backgroundColor': '#1e2130',
@@ -51,14 +47,14 @@ class TorchEEGSeizureDetector:
         self.model_name = "EEGNet (TorchEEG)"
         
         self.model = EEGNet(
-            chunk_size=1024,
+            chunk_size=1024, # 4 seconds at 256 Hz
             num_electrodes=n_channels,
             num_classes=2,
-            F1=8,
-            F2=16,
-            D=2,
-            kernel_1=64,
-            kernel_2=16,
+            F1=8, # 8 filters in the first conv layer
+            F2=16, # 16 filters in the second conv layer
+            D=2, # depth multiplier
+            kernel_1=64, # temporal conv kernel size
+            kernel_2=16, # spatial conv kernel size
             dropout=0.5
         ).to(self.device)
         
@@ -114,8 +110,8 @@ class TorchEEGAlzheimerDetector:
         self.model = TSCeption(
             num_electrodes=n_channels,
             num_classes=2,
-            num_T=15,
-            num_S=15,
+            num_T=15, # because Alzheimer's affects multiple frequency bands
+            num_S=15, # Models local and global electrode relationships
             hid_channels=32,
             dropout=0.5
         ).to(self.device)
@@ -298,7 +294,6 @@ class ParkinsonDetector:
         return np.random.rand(len(segments), 2)
 
 
-
 def load_eeg_files():
     try:
         all_files = os.listdir(DATA_DIRECTORY)
@@ -319,19 +314,7 @@ def load_eeg_files():
     
     return sorted(files_info, key=lambda x: x["label"])
 
-def apply_filter(data, filter_type, sampling_rate=SAMPLING_RATE):
-    """Apply filter to signal data"""
-    if filter_type == "none":
-        return data
-    elif filter_type == "bandpass":
-        sos = signal.butter(4, [0.5, 45], btype='band', fs=sampling_rate, output='sos')
-        return signal.sosfilt(sos, data, axis=0)
-    elif filter_type == "lowpass":
-        sos = signal.butter(4, 45, btype='low', fs=sampling_rate, output='sos')
-        return signal.sosfilt(sos, data, axis=0)
-    return data
-
-def create_multi_channel_plot(df, channels, filtered_data=None, sampling_rate=SAMPLING_RATE):
+def create_multi_channel_plot(df, channels, sampling_rate=SAMPLING_RATE):
     """Create multi-channel EEG plot"""
     display_channels = channels[:10] if len(channels) > 10 else channels
     
@@ -342,13 +325,12 @@ def create_multi_channel_plot(df, channels, filtered_data=None, sampling_rate=SA
         subplot_titles=display_channels
     )
     
-    data_to_plot = filtered_data if filtered_data is not None else df
-    time_axis = np.arange(len(data_to_plot)) / sampling_rate
+    time_axis = np.arange(len(df)) / sampling_rate
     colors = px.colors.qualitative.Set3
     
     for i, channel in enumerate(display_channels):
-        if channel in data_to_plot.columns:
-            signal_data = data_to_plot[channel].values
+        if channel in df.columns:
+            signal_data = df[channel].values
             
             fig.add_trace(
                 go.Scattergl(
@@ -379,16 +361,14 @@ def create_multi_channel_plot(df, channels, filtered_data=None, sampling_rate=SA
     
     return fig
 
-def create_single_channel_plot(df, channel, filtered_data=None, sampling_rate=SAMPLING_RATE):
+def create_single_channel_plot(df, channel, sampling_rate=SAMPLING_RATE):
     """Create single channel EEG plot"""
-    data_to_plot = filtered_data if filtered_data is not None else df
-    
-    if channel not in data_to_plot.columns:
+    if channel not in df.columns:
         # Fallback to first channel if selected channel not found
-        channel = data_to_plot.columns[0]
+        channel = df.columns[0]
     
-    time_axis = np.arange(len(data_to_plot)) / sampling_rate
-    signal_data = data_to_plot[channel].values
+    time_axis = np.arange(len(df)) / sampling_rate
+    signal_data = df[channel].values
     
     fig = go.Figure()
     fig.add_trace(go.Scattergl(
@@ -502,7 +482,7 @@ layout = dbc.Container([
                                 'borderRadius': '8px',
                                 'borderColor': '#2d3748',
                                 'textAlign': 'center',
-                                'backgroundColor': '#0f1419',
+                                'backgroundColor': "#182940",
                                 'color': 'white',
                                 'cursor': 'pointer',
                                 'fontSize': '12px'
@@ -523,7 +503,7 @@ layout = dbc.Container([
                     ])
                 ])
             ], style=CARD_STYLE)
-        ], width=3),
+        ], width=4),
         
         dbc.Col([
             dbc.Card([
@@ -540,25 +520,7 @@ layout = dbc.Container([
                     ),
                 ])
             ], style=CARD_STYLE)
-        ], width=3),
-        
-        dbc.Col([
-            dbc.Card([
-                dbc.CardBody([
-                    html.H6("⚙️ Signal Processing", className="card-title", style={"color": "white"}),
-                    dcc.Dropdown(
-                        id="filter-type",
-                        options=[
-                            {"label": "None", "value": "none"},
-                            {"label": "Bandpass 1-30Hz", "value": "bandpass"},
-                            {"label": "Lowpass 30Hz", "value": "lowpass"}
-                        ],
-                        value="bandpass",
-                        clearable=False
-                    )
-                ])
-            ], style=CARD_STYLE)
-        ], width=3),
+        ], width=4),
         
         dbc.Col([
             dbc.Card([
@@ -570,7 +532,7 @@ layout = dbc.Container([
                     dbc.Spinner(html.Div(id="analyze-status"), size="sm", color="success")
                 ])
             ], style=CARD_STYLE)
-        ], width=3)
+        ], width=4)
     ], className="mb-4"),
     
     dbc.Tooltip(
@@ -659,9 +621,9 @@ layout = dbc.Container([
     dcc.Store(id="eeg-data-store"),
     dcc.Store(id="eeg-metadata-store"),
     dcc.Store(id="detection-results-store"),
-    dcc.Store(id="uploaded-file-store"),  # NEW: Store uploaded file data
+    dcc.Store(id="uploaded-file-store"),
     dcc.Interval(id="interval-component", interval=1000, n_intervals=0, max_intervals=1)
-], fluid=True, style={'backgroundColor': '#0f1419', 'minHeight': '100vh', 'padding': '20px'})
+], fluid=True, style={'backgroundColor': '#182940', 'minHeight': '100vh', 'padding': '20px'})
 
 @callback(
     Output("file-selector", "options"),
@@ -901,10 +863,9 @@ def load_eeg_data(file_path, uploaded_data):
     [Input("eeg-data-store", "data"),
      Input("eeg-metadata-store", "data"),
      Input("eeg-mode", "value"),
-     Input("channel-selector", "value"),
-     Input("filter-type", "value")]
+     Input("channel-selector", "value")]
 )
-def update_main_plots(data, metadata, mode, selected_channel, filter_type):
+def update_main_plots(data, metadata, mode, selected_channel):
     """Update main plots based on data and settings"""
     if data is None or metadata is None:
         empty_fig = go.Figure().update_layout(
@@ -923,40 +884,28 @@ def update_main_plots(data, metadata, mode, selected_channel, filter_type):
     channels = metadata['channels']
     sampling_rate = metadata['sampling_rate']
     
-    # Apply filtering
-    filtered_data = df.copy()
-    if filter_type != "none":
-        for channel in channels:
-            if channel in df.columns:
-                try:
-                    filtered_data[channel] = apply_filter(
-                        df[channel].values, filter_type, sampling_rate
-                    )
-                except:
-                    pass
-    
     if selected_channel not in channels:
         selected_channel = channels[0] if channels else None
     
     # Create plots
     if mode == "multi":
-        main_fig = create_multi_channel_plot(df, channels, filtered_data, sampling_rate)
+        main_fig = create_multi_channel_plot(df, channels, sampling_rate)
     elif mode == "single" and selected_channel:
-        main_fig = create_single_channel_plot(df, selected_channel, filtered_data, sampling_rate)
+        main_fig = create_single_channel_plot(df, selected_channel, sampling_rate)
     else:
         # Fallback to multi-channel if single mode but no channel selected
-        main_fig = create_multi_channel_plot(df, channels, filtered_data, sampling_rate)
+        main_fig = create_multi_channel_plot(df, channels, sampling_rate)
     
-    if selected_channel and selected_channel in filtered_data.columns:
-        freq_fig = create_frequency_plot(filtered_data, selected_channel, sampling_rate)
+    if selected_channel and selected_channel in df.columns:
+        freq_fig = create_frequency_plot(df, selected_channel, sampling_rate)
     else:
-        freq_fig = create_frequency_plot(filtered_data, channels[0], sampling_rate)
+        freq_fig = create_frequency_plot(df, channels[0], sampling_rate)
     
     # Signal quality
     signal_quality = "Good"
     try:
-        if selected_channel and selected_channel in filtered_data.columns:
-            std_val = filtered_data[selected_channel].std()
+        if selected_channel and selected_channel in df.columns:
+            std_val = df[selected_channel].std()
             if std_val > 100:
                 signal_quality = "Poor"
             elif std_val > 50:
@@ -977,7 +926,7 @@ def update_main_plots(data, metadata, mode, selected_channel, filter_type):
      Output("prediction-confidence", "children"),
      Output("analyze-status", "children"),
      Output("detection-results-store", "data"),
-     Output("analyze-btn", "disabled")],   # ✅ Disable after analysis
+     Output("analyze-btn", "disabled")],
     Input("analyze-btn", "n_clicks"),
     [State("eeg-data-store", "data"),
      State("eeg-metadata-store", "data")],

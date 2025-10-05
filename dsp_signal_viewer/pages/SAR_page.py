@@ -58,7 +58,7 @@ layout = dbc.Container([
                             'width': '100%',
                             'marginTop': '10px',
                             'marginBottom': '10px',
-                            'backgroundColor': '#0f1419',
+                            'backgroundColor': '#182940',
                             'color': 'white',
                             'border': '1px solid #2d3748',
                             'borderRadius': '5px',
@@ -81,7 +81,7 @@ layout = dbc.Container([
             ], style={**CARD_STYLE, "height": "auto"})
         ], width=8)
     ])
-], fluid=True, style={'backgroundColor': '#0f1419', 'minHeight': '100vh', 'padding': '20px'})
+], fluid=True, style={'backgroundColor': '#182940', 'minHeight': '100vh', 'padding': '20px'})
 
 # =====================
 # Callback

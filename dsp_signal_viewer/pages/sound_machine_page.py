@@ -98,7 +98,8 @@ def create_waveform_plot(file_path):
 # =====================
 # Predefined sounds
 # =====================
-SOUNDS_FOLDER = r'dsp_signal_viewer\assets\sounds'
+# SOUNDS_FOLDER = r'dsp_signal_viewer\assets\sounds'
+SOUNDS_FOLDER = r"C:\Users\chanm\signal-viewer\dsp_signal_viewer\assets\sounds"
 #SOUNDS_FOLDER = r'assets/sounds'  # your 4 original sounds
 sound_files = [f for f in os.listdir(SOUNDS_FOLDER) if f.endswith(".wav")]
 
@@ -143,7 +144,7 @@ layout = dbc.Container([
                             "borderWidth": "1px", "borderStyle": "dashed",
                             "borderRadius": "5px", "textAlign": "center",
                             "color": "white",
-                            "backgroundColor": "#1e2130"
+                            "backgroundColor":"#182940"
                         }
                     ),
                     html.Br(),
@@ -171,7 +172,7 @@ layout = dbc.Container([
                             "backgroundColor": "#1e2130",
                             "color": "black"
                         }),
-                        style={"backgroundColor": "#1e2130", "padding": "10px", "borderRadius": "5px"}
+                        style={"backgroundColor": "#182940", "padding": "10px", "borderRadius": "5px"}
                     ),
                     html.Br(),
 
@@ -208,7 +209,7 @@ layout = dbc.Container([
 
     # Hidden Store
     dcc.Store(id="uploaded-file-path", data=None)
-], fluid=True, style={'backgroundColor': '#0f1419', 'minHeight': '100vh', 'padding': '20px'})
+], fluid=True, style={'backgroundColor': '#182940', 'minHeight': '100vh', 'padding': '20px'})
 
 # =====================
 # Callbacks

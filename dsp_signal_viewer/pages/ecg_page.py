@@ -27,7 +27,8 @@ ACTIVE_STYLE = {"backgroundColor": "#2c7f91", "borderColor": "#2c7f91", "color":
 INACTIVE_STYLE = {"backgroundColor": "#3E9AAB", "borderColor": "#3E9AAB", "color": "white", "marginRight": "10px"}
 
 # --- Load model ---
-MODEL_PATH = r"models\model.hdf5"
+# MODEL_PATH = r"models\model.hdf5"
+MODEL_PATH = r"C:\Users\chanm\signal-viewer\models\model.hdf5"
 model = load_model(MODEL_PATH, compile=False)
 ABNORMALITIES = ["1dAVb", "RBBB", "LBBB", "SB", "AF", "ST"]
 THRESHOLD = 0.3
