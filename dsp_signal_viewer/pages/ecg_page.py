@@ -202,17 +202,6 @@ layout = dbc.Container([
                         value=2,
                         marks={i: f"{i}s" for i in [0.5, 1, 2, 3, 4, 5]},
                         tooltip={"placement": "bottom", "always_visible": True}
-                    ),
-                    html.Label("Abnormal Beat Detection:"),
-                    dcc.RadioItems(
-                        id="abnormal-beat-radio",
-                        options=[
-                            {"label": "Show Points", "value": "points"},
-                            {"label": "Show Lines", "value": "lines"}
-                        ],
-                        value="points",
-                        inline=True,
-                        inputStyle={"marginRight": "5px", "marginLeft": "10px"}
                     )
                 ])
             ])
@@ -233,9 +222,7 @@ layout = dbc.Container([
     dcc.Store(id="colormap", data="Blues"),
     dcc.Store(id="xor-chunk-size", data=2),
     dcc.Store(id="current-position", data=0),
-    dcc.Store(id="ecg-prediction-result", data=""),
-    dcc.Store(id="abnormal-beat-mode", data="points"),
-    dcc.Store(id="xor-history", data=[])  # Store XOR history for moving display
+    dcc.Store(id="ecg-prediction-result", data="")  # Store the prediction result
 ], fluid=True)
 
 # --- Initialize the app with callback exception suppression ---
@@ -285,13 +272,6 @@ def update_colormap(colormap):
 def update_xor_chunk_size(size):
     return size
 
-@dash.callback(
-    Output("abnormal-beat-mode", "data"),
-    Input("abnormal-beat-radio", "value")
-)
-def update_abnormal_beat_mode(mode):
-    return mode
-
 # --- Run prediction on button click ---
 @dash.callback(
     Output("ecg-prediction-output", "children"),
@@ -330,14 +310,13 @@ def predict_ecg(n_clicks, data_json, convert_option, selected_channels):
     Output("channel-select", "options"),
     Output("channel-select", "value"),
     Output("current-position", "data", allow_duplicate=True),
-    Output("xor-history", "data", allow_duplicate=True),
     Input("upload-ecg", "contents"),
     State("upload-ecg", "filename"),
     prevent_initial_call=True
 )
 def load_csv(contents, filename):
     if contents is None:
-        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     _, content_string = contents.split(',')
     decoded = base64.b64decode(content_string)
@@ -346,14 +325,14 @@ def load_csv(contents, filename):
         df = pd.read_csv(io.StringIO(decoded.decode('utf-8-sig')))
     except Exception as e:
         print(f"Error loading CSV: {e}")
-        return None, [], [], 0, []
+        return None, [], [], 0
 
     df.columns = [c.lower().strip() for c in df.columns]
     available = [lead for lead in ECG_LEADS if lead in df.columns]
     df = df[available]
 
     options = [{"label": ch.upper(), "value": ch} for ch in available]
-    return df.to_json(date_format="iso", orient="split"), options, available, 0, []
+    return df.to_json(date_format="iso", orient="split"), options, available, 0
 
 # --- Start/Stop toggle ---
 @dash.callback(
@@ -488,38 +467,15 @@ def get_looping_data(df, current_position, window_size, step):
     
     return data_slice, new_position
 
-# --- Helper: Detect abnormal beats ---
-def detect_abnormal_beats(signal, threshold_std=2.5):
-    """Detect abnormal beats using statistical thresholding"""
-    signal = np.array(signal)
-    
-    # Calculate moving statistics
-    window_size = min(50, len(signal) // 4)
-    if window_size < 5:
-        return np.zeros_like(signal, dtype=bool)
-    
-    # Use rolling statistics to detect outliers
-    abs_signal = np.abs(signal)
-    
-    # Simple threshold-based detection
-    median_val = np.median(abs_signal)
-    mad = np.median(np.abs(abs_signal - median_val))  # Median Absolute Deviation
-    threshold = median_val + threshold_std * mad
-    
-    abnormal_mask = abs_signal > threshold
-    
-    return abnormal_mask
-
-# --- Helper: Moving XOR Plot Function ---
-def create_moving_xor_plot(df, selected_channels, chunk_size_seconds, previous_chunk_data, 
-                          current_position, is_normal, xor_history, abnormal_beat_mode, fs=FS):
+# --- Helper: XOR Plot Function ---
+def create_xor_plot(df, selected_channels, chunk_size_seconds, previous_chunk_data, current_position, is_normal, fs=FS):
     chunk_size_samples = int(chunk_size_seconds * fs)
     total_samples = len(df)
     
     if total_samples == 0:
         fig = go.Figure()
         fig.update_layout(title="No data available")
-        return fig, None, xor_history
+        return fig, None
     
     # Get current chunk with looping
     current_chunk_data, _ = get_looping_data(df[selected_channels], current_position, chunk_size_samples, 0)
@@ -530,7 +486,7 @@ def create_moving_xor_plot(df, selected_channels, chunk_size_seconds, previous_c
         fig = go.Figure()
         fig.update_layout(title="Initializing XOR plot...")
         # Store as list for JSON serialization
-        return fig, current_chunk.tolist(), xor_history
+        return fig, current_chunk.tolist()
     
     # Reconstruct previous chunk from stored data
     previous_chunk = np.array(previous_chunk_data)
@@ -565,101 +521,41 @@ def create_moving_xor_plot(df, selected_channels, chunk_size_seconds, previous_c
             title="XOR Graph - NORMAL PATIENT (No Abnormal Activity Detected)",
             template="plotly_white"
         )
-        
-        # Reset history for normal patient
-        xor_history = []
-        
     else:
-        # Abnormal patient - show moving XOR with beat detection
+        # Abnormal patient - show actual XOR activity
         # XOR operation - compare binarized signals
         current_binary = (current_chunk > np.median(current_chunk, axis=0)).astype(float)
         previous_binary = (previous_chunk > np.median(previous_chunk, axis=0)).astype(float)
         
         xor_result = np.logical_xor(current_binary, previous_binary).astype(float)
         
-        # Add to history for moving display
-        if len(xor_history) < 5:  # Keep last 5 chunks for moving display
-            xor_history.append(xor_result.tolist())
-        else:
-            xor_history.pop(0)
-            xor_history.append(xor_result.tolist())
-        
-        # Create moving display by combining history
-        if xor_history:
-            # Combine all history chunks for continuous display
-            combined_xor = np.vstack([np.array(chunk) for chunk in xor_history])
-            extended_time = np.arange(len(combined_xor)) / fs
-        else:
-            combined_xor = xor_result
-            extended_time = np.arange(len(xor_result)) / fs
-        
-        # Detect abnormal beats
-        abnormal_beats_detected = []
-        for i in range(combined_xor.shape[1]):
-            abnormal_mask = detect_abnormal_beats(combined_xor[:, i])
-            abnormal_beats_detected.append(abnormal_mask)
-        
-        # Create figure with moving XOR and abnormal beats
+        # Create figure with XOR activity
         fig = make_subplots(
             rows=len(selected_channels), cols=1,
             subplot_titles=[f"XOR: {ch.upper()} - ABNORMAL ACTIVITY" for ch in selected_channels]
         )
         
+        time_axis = np.arange(len(xor_result)) / fs
+        
         for i, ch in enumerate(selected_channels):
-            # Plot XOR signal as moving line
             fig.add_trace(
                 go.Scatter(
-                    x=extended_time, y=combined_xor[:, i],
-                    mode="lines", line=dict(color="red", width=1),
-                    name=f"{ch.upper()} - XOR Signal",
-                    opacity=0.7
+                    x=time_axis, y=xor_result[:, i],
+                    mode="lines", line=dict(color="red", width=2),
+                    name=f"{ch.upper()} - ABNORMAL",
+                    fill='tozeroy',
+                    fillcolor='rgba(255, 0, 0, 0.2)'
                 ),
                 row=i+1, col=1
             )
-            
-            # Plot abnormal beats as points or lines
-            abnormal_indices = np.where(abnormal_beats_detected[i])[0]
-            if len(abnormal_indices) > 0:
-                abnormal_times = extended_time[abnormal_indices]
-                abnormal_values = combined_xor[abnormal_indices, i]
-                
-                if abnormal_beat_mode == "points":
-                    # Show abnormal beats as red points
-                    fig.add_trace(
-                        go.Scatter(
-                            x=abnormal_times, y=abnormal_values,
-                            mode="markers",
-                            marker=dict(
-                                color="red",
-                                size=8,
-                                symbol="diamond",
-                                line=dict(width=2, color="darkred")
-                            ),
-                            name=f"{ch.upper()} - Abnormal Beats",
-                            showlegend=(i == 0)  # Only show legend for first channel
-                        ),
-                        row=i+1, col=1
-                    )
-                else:
-                    # Show abnormal beats as highlighted lines
-                    fig.add_trace(
-                        go.Scatter(
-                            x=extended_time, y=combined_xor[:, i],
-                            mode="lines",
-                            line=dict(color="red", width=3),
-                            name=f"{ch.upper()} - Abnormal Regions",
-                            showlegend=(i == 0)  # Only show legend for first channel
-                        ),
-                        row=i+1, col=1
-                    )
         
         fig.update_layout(
             height=250 * len(selected_channels),
-            title=f"Moving XOR Graph - ABNORMAL PATIENT (Real-time Activity Detection) - Mode: {abnormal_beat_mode.upper()}",
+            title="XOR Graph - ABNORMAL PATIENT (Activity Detected!)",
             template="plotly_white"
         )
     
-    return fig, current_chunk.tolist(), xor_history
+    return fig, current_chunk.tolist()
 
 # --- Main callback for graph updates ---
 @dash.callback(
@@ -667,7 +563,6 @@ def create_moving_xor_plot(df, selected_channels, chunk_size_seconds, previous_c
     Output("timer-display", "children"),
     Output("previous-chunk", "data"),
     Output("current-position", "data"),
-    Output("xor-history", "data"),
     Input("interval", "n_intervals"),
     Input("upload-ecg", "contents"),  # Also update when new data is loaded
     State("channel-select", "value"),
@@ -684,14 +579,11 @@ def create_moving_xor_plot(df, selected_channels, chunk_size_seconds, previous_c
     State("time-window-slider", "value"),
     State("current-position", "data"),
     State("ecg-prediction-result", "data"),
-    State("abnormal-beat-mode", "data"),
-    State("xor-history", "data"),
     prevent_initial_call=True
 )
 def update_live(n_intervals, upload_contents, selected_channels, convert_option, start_time, is_running, data_json, 
                 graph_type, previous_chunk, polar_mode, recurrence_mode, 
-                colormap, xor_chunk_size, time_window, current_position, prediction_result,
-                abnormal_beat_mode, xor_history):
+                colormap, xor_chunk_size, time_window, current_position, prediction_result):
     
     # Use callback context to determine which input triggered the callback
     ctx = dash.callback_context
@@ -708,7 +600,7 @@ def update_live(n_intervals, upload_contents, selected_channels, convert_option,
             plot_bgcolor="white",
             paper_bgcolor="white"
         )
-        return fig, "", previous_chunk, current_position, xor_history
+        return fig, "", previous_chunk, current_position
 
     df = pd.read_json(data_json, orient="split")
     df.columns = [c.lower() for c in df.columns]
@@ -733,7 +625,6 @@ def update_live(n_intervals, upload_contents, selected_channels, convert_option,
     t_window = np.arange(len(data_slice)) / FS
 
     new_previous_chunk = previous_chunk
-    new_xor_history = xor_history
 
     # Determine if patient is normal based on prediction result
     is_normal = prediction_result == "normal"
@@ -771,16 +662,115 @@ def update_live(n_intervals, upload_contents, selected_channels, convert_option,
 
     # XOR Plot
     elif graph_type == "xor":
-        fig, new_previous_chunk, new_xor_history = create_moving_xor_plot(
-            df, selected_channels, xor_chunk_size, previous_chunk, 
-            current_position, is_normal, xor_history, abnormal_beat_mode
+        fig, new_previous_chunk = create_xor_plot(df, selected_channels, xor_chunk_size, previous_chunk, current_position, is_normal)
+
+    # Polar Plot
+    elif graph_type == "polar":
+        rows = len(selected_channels)
+        specs = [[{"type": "polar"}] for _ in range(rows)]
+        fig = make_subplots(rows=rows, cols=1,
+                            subplot_titles=[f"{ch.upper()}<br><br>" for ch in selected_channels],
+                            specs=specs)
+        
+        for ann in fig['layout']['annotations']:
+            ann['y'] += 0.01
+
+        for i, ch in enumerate(selected_channels):
+            if polar_mode == "latest":
+                # Show only latest data
+                y = data_slice[ch].iloc[::DOWNSAMPLE].to_numpy()
+            else:
+                # Cumulative - show all data up to current position
+                cumulative_data, _ = get_looping_data(df[selected_channels], 0, current_position + current_window_size, 0)
+                y = cumulative_data[ch].iloc[::DOWNSAMPLE].to_numpy()
+                
+            theta = np.linspace(0, 360, len(y), endpoint=False)
+            fig.add_trace(
+                go.Scatterpolar(r=y, theta=theta, mode="lines",
+                                line=dict(color="blue", width=line_width),
+                                name=ch.upper(), showlegend=False),
+                row=i+1, col=1
+            )
+
+        fig.update_layout(
+            height=400 * len(selected_channels),
+            margin=dict(l=60, r=40, t=100, b=40),
+            polar=dict(
+                angularaxis=dict(rotation=0, direction="counterclockwise", tickfont=dict(size=9)),
+                radialaxis=dict(angle=0, tickfont=dict(size=9))
+            ),
+            title=dict(y=0.98)
         )
 
-    # Other plot types (Polar and Recurrence) remain the same as before
-    # ... [Polar and Recurrence plot code remains unchanged] ...
+    # Recurrence Plot
+    elif graph_type == "recurrence":
+        if recurrence_mode == "latest":
+            # Use only current window
+            display_data = data_slice
+        else:
+            # Cumulative - use all data up to current position
+            display_data, _ = get_looping_data(df, 0, current_position + current_window_size, 0)
+
+        display_data = display_data.iloc[::DOWNSAMPLE]
+
+        if len(selected_channels) == 1:
+            ch = selected_channels[0]
+            s = display_data[ch].to_numpy()
+            dist = np.abs(np.subtract.outer(s, s))
+
+            fig = go.Figure(data=go.Heatmap(z=dist, colorscale=colormap))
+            fig.update_layout(
+                title=f"Recurrence Plot: {ch.upper()}",
+                xaxis_title="Time Index",
+                yaxis_title="Time Index",
+                height=500,
+                template="plotly_white"
+            )
+
+        elif len(selected_channels) == 2:
+            ch1, ch2 = selected_channels
+            s1 = display_data[ch1].to_numpy()
+            s2 = display_data[ch2].to_numpy()
+            dist = np.abs(np.subtract.outer(s1, s2))
+
+            fig = go.Figure(data=go.Heatmap(z=dist, colorscale=colormap))
+            fig.update_layout(
+                title=f"Cross-Recurrence: {ch1.upper()} vs {ch2.upper()}",
+                xaxis_title=f"{ch1.upper()} Index",
+                yaxis_title=f"{ch2.upper()} Index",
+                height=500,
+                template="plotly_white"
+            )
+
+        else:
+            # Handle multiple channels by averaging groups
+            if len(selected_channels) >= 2:
+                mid_point = len(selected_channels) // 2
+                groupA = selected_channels[:mid_point]
+                groupB = selected_channels[mid_point:]
+                
+                sA = display_data[groupA].mean(axis=1).to_numpy()
+                sB = display_data[groupB].mean(axis=1).to_numpy()
+                dist = np.abs(np.subtract.outer(sA, sB))
+
+                fig = go.Figure(data=go.Heatmap(z=dist, colorscale=colormap))
+                fig.update_layout(
+                    title=f"Group Recurrence: {', '.join([g.upper() for g in groupA])} vs {', '.join([g.upper() for g in groupB])}",
+                    xaxis_title="Group A Index",
+                    yaxis_title="Group B Index",
+                    height=500,
+                    template="plotly_white"
+                )
+            else:
+                fig = go.Figure()
+                fig.update_layout(
+                    title="⚠️ Please select at least 1 channel",
+                    template="plotly_white",
+                    height=300
+                )
 
     else:
         fig = go.Figure()
 
     timer_text = f"Elapsed Time: {int(pytime.time() - start_time)} s" if is_running and start_time else ""
-    return fig, timer_text, new_previous_chunk, current_position, new_xor_history
+    return fig, timer_text, new_previous_chunk, current_position
