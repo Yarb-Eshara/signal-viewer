@@ -98,8 +98,8 @@ def create_waveform_plot(file_path):
 # =====================
 # Predefined sounds
 # =====================
-# SOUNDS_FOLDER = r'dsp_signal_viewer\assets\sounds'
-SOUNDS_FOLDER = r"C:\Users\chanm\signal-viewer\dsp_signal_viewer\assets\sounds"
+SOUNDS_FOLDER = r'dsp_signal_viewer\assets\sounds'
+#SOUNDS_FOLDER = r"C:\Users\chanm\signal-viewer\dsp_signal_viewer\assets\sounds"
 #SOUNDS_FOLDER = r'assets/sounds'  # your 4 original sounds
 sound_files = [f for f in os.listdir(SOUNDS_FOLDER) if f.endswith(".wav")]
 
