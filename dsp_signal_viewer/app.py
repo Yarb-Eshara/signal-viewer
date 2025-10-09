@@ -17,6 +17,7 @@ navbar = dbc.Navbar(
             dbc.NavItem(dbc.NavLink("ECG", href="/ecg")),
             dbc.NavItem(dbc.NavLink("EEG", href="/eeg")),
             dbc.NavItem(dbc.NavLink("Sound Doppler", href="/sound-doppler")),
+            dbc.NavItem(dbc.NavLink("Radar", href="/radar")),
             dbc.NavItem(dbc.NavLink("Drone", href="/drone")),
             dbc.NavItem(dbc.NavLink("SAR", href="/sar")),
         ], className="ms-auto", navbar=True),
