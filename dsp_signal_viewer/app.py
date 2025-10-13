@@ -9,12 +9,24 @@ app = dash.Dash(
     pages_folder="./pages"
 )
 
+# ECG Dropdown Component
+ecg_dropdown = dbc.DropdownMenu(
+    children=[
+        dbc.DropdownMenuItem("ECG Viewer", href="/ecg"),
+        dbc.DropdownMenuItem("ECG Down Sampling", href="/ecg-downsampling"),
+    ],
+    nav=True,
+    in_navbar=True,
+    label="ECG",
+    style={"marginRight": "10px"}
+)
+
 navbar = dbc.Navbar(
     dbc.Container([
         dbc.NavbarBrand("Signal Viewer", href="/"),
         dbc.Nav([
             dbc.NavItem(dbc.NavLink("Home", href="/")),
-            dbc.NavItem(dbc.NavLink("ECG", href="/ecg")),
+            dbc.NavItem(ecg_dropdown),  # Replace the simple ECG link with dropdown
             dbc.NavItem(dbc.NavLink("EEG", href="/eeg")),
             dbc.NavItem(dbc.NavLink("Sound Doppler", href="/sound-doppler")),
             dbc.NavItem(dbc.NavLink("Radar", href="/radar")),
