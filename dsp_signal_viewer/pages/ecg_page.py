@@ -11,9 +11,9 @@ import time as pytime
 from keras.models import load_model
 from scipy.signal import resample
 import wfdb
-
+from pathlib import Path
 dash.register_page(__name__, path="/ecg", name="ECG")
-
+import os
 # --- Parameters ---
 WINDOW_SIZE = 2500
 STEP = 250
@@ -27,7 +27,9 @@ ACTIVE_STYLE = {"backgroundColor": "#2c7f91", "borderColor": "#2c7f91", "color":
 INACTIVE_STYLE = {"backgroundColor": "#3E9AAB", "borderColor": "#3E9AAB", "color": "white", "marginRight": "10px"}
 
 # --- Load model ---
-MODEL_PATH = r"models\model.hdf5"
+BASE_DIR = Path(__file__).resolve().parents[2]
+MODEL_PATH = os.path.join(BASE_DIR, "models", "model.hdf5")
+
 model = load_model(MODEL_PATH, compile=False)
 ABNORMALITIES = ["1dAVb", "RBBB", "LBBB", "SB", "AF", "ST"]
 THRESHOLD = 0.3

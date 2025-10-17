@@ -32,6 +32,7 @@ navbar = dbc.Navbar(
             dbc.NavItem(dbc.NavLink("Radar", href="/radar")),
             dbc.NavItem(dbc.NavLink("Drone", href="/drone")),
             dbc.NavItem(dbc.NavLink("SAR", href="/sar")),
+            dbc.NavItem(dbc.NavLink("Sound Aliasing", href="/sound-aliasing")),
         ], className="ms-auto", navbar=True),
     ]),
     dark=True,

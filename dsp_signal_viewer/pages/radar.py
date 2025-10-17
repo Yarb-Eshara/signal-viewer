@@ -21,10 +21,6 @@ BASE_DIR = os.path.dirname(os.path.dirname(__file__))  # dsp_signal_viewer/
 model_path = os.path.join(BASE_DIR, "models", "velocity_model.h5")
 x_scaler_path = os.path.join(BASE_DIR, "models", "x_scaler.pkl")
 
-# --- Load model and scaler ---
-print("Loading model from:", model_path)
-print("File exists?", os.path.exists(model_path))
-
 model = keras.models.load_model(model_path, compile=False)
 x_scaler = joblib.load(x_scaler_path)
 

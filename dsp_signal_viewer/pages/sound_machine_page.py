@@ -52,7 +52,6 @@ print("Model loaded successfully!")
 # Helper Functions
 # =====================
 
-
 def pad_or_repeat_audio(file_path, target_duration_sec=3, padded_folder=r"assets/padded_sounds"):
     # Make sure the padded folder exists
     os.makedirs(padded_folder, exist_ok=True)
@@ -78,8 +77,6 @@ def pad_or_repeat_audio(file_path, target_duration_sec=3, padded_folder=r"assets
     sf.write(padded_file_path, data, sr)
     return padded_file_path
 
-
-
 def create_waveform_plot(file_path):
     data, sr = librosa.load(file_path, sr=None)
     fig = go.Figure()
@@ -98,9 +95,8 @@ def create_waveform_plot(file_path):
 # =====================
 # Predefined sounds
 # =====================
-SOUNDS_FOLDER = r'dsp_signal_viewer\assets\sounds'
-#SOUNDS_FOLDER = r"C:\Users\chanm\signal-viewer\dsp_signal_viewer\assets\sounds"
-#SOUNDS_FOLDER = r'assets/sounds'  # your 4 original sounds
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+SOUNDS_FOLDER = os.path.join(BASE_DIR, "assets", "sounds")
 sound_files = [f for f in os.listdir(SOUNDS_FOLDER) if f.endswith(".wav")]
 
 # Only use original filenames in dropdown
@@ -215,10 +211,10 @@ layout = dbc.Container([
 # Callbacks
 # =====================
 @dash.callback(
-    Output("audio-player", "src"),
-    Output("waveform-plot", "figure"),
-    Output("predict-button", "disabled"),
-    Output("uploaded-file-path", "data"),
+    Output("audio-player", "src", allow_duplicate=True),
+    Output("waveform-plot", "figure", allow_duplicate=True),
+    Output("predict-button", "disabled", allow_duplicate=True),
+    Output("uploaded-file-path", "data", allow_duplicate=True),
     Input("upload-sound-machine", "contents"),
     Input("dropdown-sounds", "value"),
     Input("remove-button", "n_clicks"),
