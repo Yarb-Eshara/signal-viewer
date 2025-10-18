@@ -14,7 +14,6 @@ from scipy import signal
 import tempfile
 import os
 import torch
-import torchaudio
 from transformers import AutoModelForAudioClassification, AutoFeatureExtractor
 from voicefixer import VoiceFixer as VoiceFixerModel
 import torchaudio
