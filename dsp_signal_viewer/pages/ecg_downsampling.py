@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 import dash
 from dash import html, dcc, Input, Output, State
 import dash_bootstrap_components as dbc
@@ -27,8 +30,8 @@ ACTIVE_STYLE = {"backgroundColor": "#2c7f91", "borderColor": "#2c7f91", "color":
 INACTIVE_STYLE = {"backgroundColor": "#3E9AAB", "borderColor": "#3E9AAB", "color": "white", "marginRight": "10px"}
 
 # --- Load model ---
-# MODEL_PATH = r"models\model.hdf5"
-MODEL_PATH =r"C:\Users\chanm\signal-viewer\models\model.hdf5"
+BASE_DIR = Path(__file__).resolve().parents[2]
+MODEL_PATH = os.path.join(BASE_DIR, "models", "model.hdf5")
 model = load_model(MODEL_PATH, compile=False)
 ABNORMALITIES = ["1dAVb", "RBBB", "LBBB", "SB", "AF", "ST"]
 THRESHOLD = 0.3
@@ -95,8 +98,8 @@ layout = dbc.Container([
                 style={"color": "#182940", "width": "100%"}
             ),
             html.Div(id="nyquist-display", style={
-                "fontWeight": "bold", 
-                "marginTop": "5px", 
+                "fontWeight": "bold",
+                "marginTop": "5px",
                 "color": "#3E9AAB",
                 "fontSize": "14px"
             })
@@ -166,7 +169,7 @@ def update_nyquist_display(downsample_factor):
     original_fs = FS
     new_fs = original_fs / int(downsample_factor)
     nyquist_rate = new_fs / 2
-    
+
     # Get nyquist rate from mapping
     nyquist = NYQUIST_RATES.get(downsample_factor, nyquist_rate)
     return f"Nyquist: {nyquist} Hz"
@@ -182,20 +185,20 @@ def update_nyquist_info(downsample_factor, prediction_result):
     original_fs = FS
     new_fs = original_fs / downsample_factor_int
     nyquist_rate = new_fs / 2
-    
+
     # ECG frequency components information
     ecg_components = {
         "P Wave": "0.67-5 Hz",
-        "QRS Complex": "10-50 Hz", 
+        "QRS Complex": "10-50 Hz",
         "T Wave": "1-7 Hz",
         "ST Segment": "0.67-5 Hz",
         "High Frequency QRS": "150-250 Hz"
     }
-    
+
     # Determine which components are affected
     affected_components = []
     preserved_components = []
-    
+
     for component, freq_range in ecg_components.items():
         # Extract max frequency from range
         max_freq = float(freq_range.split('-')[-1].split(' ')[0])
@@ -203,24 +206,24 @@ def update_nyquist_info(downsample_factor, prediction_result):
             affected_components.append(f"{component} ({freq_range})")
         else:
             preserved_components.append(f"{component} ({freq_range})")
-    
+
     # Create information message
     info_parts = [
         f"Current Sampling: {new_fs} Hz | Nyquist Rate: {nyquist_rate:.2f} Hz"
     ]
-    
+
     if affected_components:
         info_parts.append(f"⚠️ Affected: {', '.join(affected_components)}")
-    
+
     if preserved_components:
         info_parts.append(f"✓ Preserved: {', '.join(preserved_components)}")
-    
+
     # Add prediction effect information
     if prediction_result:
         info_parts.append(f"📊 Prediction: {prediction_result.upper()}")
         if affected_components and prediction_result == "abnormal":
             info_parts.append("🔍 Downsampling may affect abnormality detection!")
-    
+
     return " | ".join(info_parts)
 
 # --- Run prediction on button click ---
@@ -236,15 +239,15 @@ def update_nyquist_info(downsample_factor, prediction_result):
 def predict_ecg(n_clicks, data_json, selected_channels, downsample_factor):
     if data_json is None or not selected_channels:
         return "⚠️ No ECG data or channels selected.", ""
-    
+
     df = pd.read_json(data_json, orient="split")
     df.columns = [c.lower() for c in df.columns]
-    
+
     # Apply downsampling to the data before prediction
     downsample_factor_int = int(downsample_factor)
     if downsample_factor_int > 1:
         df = apply_downsampling(df, downsample_factor_int)
-    
+
     # Keep only selected channels
     df = df[selected_channels]
 
@@ -260,14 +263,14 @@ def apply_downsampling(df, downsample_factor):
     """Apply downsampling to all channels in the DataFrame"""
     if downsample_factor <= 1:
         return df
-    
+
     downsampled_data = {}
     for column in df.columns:
         signal = df[column].values
         # Use scipy's decimate for better anti-aliasing
         downsampled_signal = decimate(signal, downsample_factor, zero_phase=True)
         downsampled_data[column] = downsampled_signal
-    
+
     return pd.DataFrame(downsampled_data)
 
 # --- Helper: Run ECG model prediction ---
@@ -357,13 +360,13 @@ def toggle_run(n_clicks, is_running, start_time):
 def get_looping_data(df, current_position, window_size, step):
     """Get data that loops when reaching the end"""
     total_samples = len(df)
-    
+
     if total_samples == 0:
         return pd.DataFrame(), current_position
-    
+
     # Calculate end position
     end_position = current_position + window_size
-    
+
     if end_position <= total_samples:
         # Normal case - no looping needed
         data_slice = df.iloc[current_position:end_position]
@@ -372,17 +375,17 @@ def get_looping_data(df, current_position, window_size, step):
         # Need to loop - combine end and beginning
         samples_from_end = total_samples - current_position
         samples_from_start = window_size - samples_from_end
-        
+
         part1 = df.iloc[current_position:]
         part2 = df.iloc[:samples_from_start]
-        
+
         data_slice = pd.concat([part1, part2], ignore_index=True)
         new_position = samples_from_start
-    
+
     # Ensure we don't exceed data length
     if new_position >= total_samples:
         new_position = new_position % total_samples
-    
+
     return data_slice, new_position
 
 # --- Combined callback for timer and graph updates ---
@@ -400,21 +403,21 @@ def get_looping_data(df, current_position, window_size, step):
     State("current-position-downsample", "data"),
     prevent_initial_call=True
 )
-def update_graph_and_timer(n_intervals, upload_contents, downsample_factor, selected_channels, 
+def update_graph_and_timer(n_intervals, upload_contents, downsample_factor, selected_channels,
                           start_time, is_running, data_json, current_position):
-    
+
     # Use callback context to determine which input triggered the callback
     ctx = dash.callback_context
     triggered_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
-    
-    line_width = 1.5 
-    
+
+    line_width = 1.5
+
     # Update timer display
     timer_text = ""
     if is_running and start_time:
         elapsed = int(pytime.time() - start_time)
         timer_text = f"Elapsed Time: {elapsed} s"
-    
+
     # If no data or channels selected, return empty figure
     if data_json is None or not selected_channels:
         fig = go.Figure()
@@ -438,7 +441,7 @@ def update_graph_and_timer(n_intervals, upload_contents, downsample_factor, sele
     total_samples = df.shape[0]
     current_fs = FS / downsample_factor_int
     current_window_size = int(WINDOW_SIZE / downsample_factor_int)  # Adjust window size for downsampled data
-    
+
     # Only update position if the interval triggered the callback and is running
     if triggered_id == "interval-downsample" and is_running:
         # Get data with looping and update position
@@ -447,7 +450,7 @@ def update_graph_and_timer(n_intervals, upload_contents, downsample_factor, sele
     else:
         # For other triggers (like upload or parameter changes), just get current data without updating position
         data_slice, _ = get_looping_data(df, current_position, current_window_size, 0)
-    
+
     t_window = np.arange(len(data_slice)) / current_fs
 
     # Create regular ECG plot
@@ -455,7 +458,7 @@ def update_graph_and_timer(n_intervals, upload_contents, downsample_factor, sele
         rows=len(selected_channels), cols=1, shared_xaxes=True,
         subplot_titles=[f"{ch.upper()} (Downsampled {downsample_factor_int}x)" for ch in selected_channels]
     )
-    
+
     for i, ch in enumerate(selected_channels):
         y = data_slice[ch].values
         x = t_window
@@ -465,16 +468,16 @@ def update_graph_and_timer(n_intervals, upload_contents, downsample_factor, sele
                        name=ch.upper(), showlegend=False),
             row=i+1, col=1
         )
-    
+
     for i in range(len(selected_channels)):
         fig.update_xaxes(row=i+1, col=1, tickfont=dict(size=9, color="black"))
         fig.update_yaxes(row=i+1, col=1, tickfont=dict(size=9, color="black"),
                          title_standoff=50)
-    
+
     # Get current downsampling option for display
     current_option = next((opt for opt in DOWNSAMPLING_OPTIONS if opt["value"] == downsample_factor), None)
     sampling_info = current_option["label"] if current_option else f"Downsampled {downsample_factor_int}x"
-    
+
     fig.update_layout(
         height=250 * len(selected_channels),
         template="plotly_white",

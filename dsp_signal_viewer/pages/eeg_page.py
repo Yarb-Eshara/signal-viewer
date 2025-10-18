@@ -27,7 +27,7 @@ dash.register_page(__name__, path="/eeg", name="EEG")
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))  # dsp_signal_viewer/
 SEIZURE_MODEL_PATH = os.path.join(BASE_DIR, "models", "CHB_MIT_sz_detec_demo.h5")
-BASE_DIR_data = Path(__file__).resolve().parents[2] 
+BASE_DIR_data = Path(__file__).resolve().parents[2]
 DATA_DIRECTORY = os.path.join(BASE_DIR_data, "data", "Annotated_EEG")
 
 CARD_STYLE = {
@@ -45,28 +45,28 @@ class H5SeizureDetector:
     def __init__(self, model_path=SEIZURE_MODEL_PATH):
         if not TF_AVAILABLE:
             raise ImportError("TensorFlow not installed")
-        
+
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Seizure model not found at {model_path}")
-        
+
         try:
             self.model = load_model(model_path)
             self.model_name = "CHB-MIT Seizure Detection Model"
             print(f"Successfully loaded seizure detection model from {model_path}")
         except Exception as e:
             raise Exception(f"Failed to load model: {str(e)}")
-        
+
         # Get model input shape to understand expected dimensions
         self.input_shape = self.model.input_shape
         print(f"Model input shape: {self.input_shape}")
-        
+
         self.scaler = StandardScaler()
-        
+
     def preprocess(self, segments):
         """Preprocess segments for the H5 model"""
         # segments: (batch, timesteps, channels)
         n_segments, timesteps, n_channels = segments.shape
-        
+
         # Model expects 18 channels, so adjust if needed
         expected_channels = self.input_shape[1]
         if n_channels > expected_channels:
@@ -78,27 +78,27 @@ class H5SeizureDetector:
             padding = np.zeros((n_segments, timesteps, expected_channels - n_channels))
             segments = np.concatenate([segments, padding], axis=2)
             n_channels = expected_channels
-        
+
         # Normalize each channel separately
         segments_normalized = np.zeros_like(segments)
         for i in range(n_channels):
             channel_data = segments[:, :, i].reshape(-1, 1)
             segments_normalized[:, :, i] = self.scaler.fit_transform(channel_data).reshape(n_segments, timesteps)
-        
+
         # Model expects: (batch, channels, timesteps, 1)
         # Current: (batch, timesteps, channels)
         # Transform: transpose then add dimension
         tensor = segments_normalized.transpose(0, 2, 1)  # (batch, channels, timesteps)
         tensor = np.expand_dims(tensor, axis=-1)  # (batch, channels, timesteps, 1)
-        
+
         return tensor.astype(np.float32)
-    
+
     def predict(self, segments):
         """Predict seizure probability using H5 model"""
         try:
             x = self.preprocess(segments)
             predictions = self.model.predict(x, verbose=0)
-            
+
             # Handle different output formats
             if predictions.shape[1] == 1:
                 # Binary classification with single output
@@ -108,7 +108,7 @@ class H5SeizureDetector:
             else:
                 # Multi-class output
                 return predictions
-                
+
         except Exception as e:
             print(f"Prediction error: {e}")
             # Fallback to random predictions
@@ -122,10 +122,10 @@ class TorchEEGAlzheimerDetector:
     def __init__(self, n_channels=18):
         if not TORCHEEG_AVAILABLE:
             raise ImportError("TorchEEG not installed")
-        
+
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model_name = "TSCeption (TorchEEG)"
-        
+
         self.model = TSCeption(
             num_electrodes=n_channels,
             num_classes=2,
@@ -134,11 +134,11 @@ class TorchEEGAlzheimerDetector:
             hid_channels=32,
             dropout=0.5
         ).to(self.device)
-        
+
         self._initialize_weights()
         self.model.eval()
         self.scaler = StandardScaler()
-        
+
     def _initialize_weights(self):
         for m in self.model.modules():
             if isinstance(m, nn.Conv2d):
@@ -150,17 +150,17 @@ class TorchEEGAlzheimerDetector:
                 nn.init.xavier_normal_(m.weight)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
-    
+
     def preprocess(self, segments):
         n_segments, timesteps, n_channels = segments.shape
-        
+
         segments_reshaped = segments.reshape(-1, n_channels)
         segments_normalized = self.scaler.fit_transform(segments_reshaped)
         segments_normalized = segments_normalized.reshape(n_segments, timesteps, n_channels)
-        
+
         tensor = torch.FloatTensor(segments_normalized).unsqueeze(1).permute(0, 1, 3, 2)
         return tensor.to(self.device)
-    
+
     def predict(self, segments):
         self.model.eval()
         with torch.no_grad():
@@ -175,10 +175,10 @@ class TorchEEGParkinsonDetector:
     def __init__(self, n_channels=18):
         if not TORCHEEG_AVAILABLE:
             raise ImportError("TorchEEG not installed")
-        
+
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model_name = "FBCCNN (TorchEEG)"
-        
+
         self.model = FBCCNN(
             num_classes=2,
             num_electrodes=n_channels,
@@ -188,11 +188,11 @@ class TorchEEGParkinsonDetector:
             F2=256,
             D=2
         ).to(self.device)
-        
+
         self._initialize_weights()
         self.model.eval()
         self.scaler = StandardScaler()
-        
+
     def _initialize_weights(self):
         for m in self.model.modules():
             if isinstance(m, nn.Conv2d):
@@ -204,17 +204,17 @@ class TorchEEGParkinsonDetector:
                 nn.init.xavier_normal_(m.weight)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
-    
+
     def preprocess(self, segments):
         n_segments, timesteps, n_channels = segments.shape
-        
+
         segments_reshaped = segments.reshape(-1, n_channels)
         segments_normalized = self.scaler.fit_transform(segments_reshaped)
         segments_normalized = segments_normalized.reshape(n_segments, timesteps, n_channels)
-        
+
         tensor = torch.FloatTensor(segments_normalized).unsqueeze(1).permute(0, 1, 3, 2)
         return tensor.to(self.device)
-    
+
     def predict(self, segments):
         self.model.eval()
         with torch.no_grad():
@@ -230,16 +230,16 @@ class CHBMITPreprocessor:
         self.fs = fs
         # Use 18 channels to match the seizure detection model
         self.standard_channels = [
-            'Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 
-            'C3', 'Cz', 'C4', 'P3', 'Pz', 'P4', 
+            'Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8',
+            'C3', 'Cz', 'C4', 'P3', 'Pz', 'P4',
             'T3', 'T4', 'T5', 'T6', 'O1'
         ]
-    
+
     def map_channels_to_standard(self, data):
         """Map available channels to standard 18 channels"""
         mapped_data = pd.DataFrame()
         available_channels = data.columns.tolist()
-        
+
         for std_ch in self.standard_channels:
             if std_ch in available_channels:
                 mapped_data[std_ch] = data[std_ch]
@@ -249,25 +249,25 @@ class CHBMITPreprocessor:
                     mapped_data[std_ch] = data[similar[0]]
                 else:
                     mapped_data[std_ch] = 0.0
-        
+
         return mapped_data
-    
+
     def segment_data(self, data, window_size=1024, overlap=0.5):
         """Segment data into windows"""
         step_size = int(window_size * (1 - overlap))
         segments = []
-        
+
         for i in range(0, len(data) - window_size + 1, step_size):
             segment = data.iloc[i:i + window_size].values
             segments.append(segment)
-        
+
         if not segments:
             segment = data.values
             if len(segment) < window_size:
                 padding = np.zeros((window_size - len(segment), segment.shape[1]))
                 segment = np.vstack([segment, padding])
             segments.append(segment)
-        
+
         return np.array(segments)
 
 
@@ -283,7 +283,7 @@ class SeizureDetector:
             self.detector = None
             self.model_name = "Not Available"
             self.status = f"❌ H5 Model Error: {str(e)[:50]}"
-    
+
     def predict(self, segments):
         if self.detector:
             return self.detector.predict(segments)
@@ -295,7 +295,7 @@ class AlzheimerDetector:
         self.detector = TorchEEGAlzheimerDetector() if TORCHEEG_AVAILABLE else None
         self.model_name = self.detector.model_name if self.detector else "Not Available"
         self.status = "✅ Available" if self.detector else "❌ TorchEEG not available"
-    
+
     def predict(self, segments):
         if self.detector:
             return self.detector.predict(segments)
@@ -307,7 +307,7 @@ class ParkinsonDetector:
         self.detector = TorchEEGParkinsonDetector() if TORCHEEG_AVAILABLE else None
         self.model_name = self.detector.model_name if self.detector else "Not Available"
         self.status = "✅ Available" if self.detector else "❌ TorchEEG not available"
-    
+
     def predict(self, segments):
         if self.detector:
             return self.detector.predict(segments)
@@ -321,10 +321,10 @@ def load_eeg_files():
         edf_files = [os.path.join(DATA_DIRECTORY, f) for f in all_files if f.lower().endswith('.edf')]
     except Exception as e:
         return [{"label": f"Error reading directory: {str(e)}", "value": "error"}]
-    
+
     if not edf_files:
         return [{"label": "No EDF files found", "value": "no-files"}]
-    
+
     files_info = []
     for file_path in edf_files:
         file_name = os.path.basename(file_path)
@@ -332,27 +332,27 @@ def load_eeg_files():
             "label": f"📄 {file_name}",
             "value": file_path
         })
-    
+
     return sorted(files_info, key=lambda x: x["label"])
 
 def create_multi_channel_plot(df, channels, sampling_rate=SAMPLING_RATE):
     """Create multi-channel EEG plot"""
     display_channels = channels[:10] if len(channels) > 10 else channels
-    
+
     fig = make_subplots(
         rows=len(display_channels), cols=1,
         shared_xaxes=True,
         vertical_spacing=0.015,
         subplot_titles=display_channels
     )
-    
+
     time_axis = np.arange(len(df)) / sampling_rate
     colors = px.colors.qualitative.Set3
-    
+
     for i, channel in enumerate(display_channels):
         if channel in df.columns:
             signal_data = df[channel].values
-            
+
             fig.add_trace(
                 go.Scattergl(
                     x=time_axis,
@@ -364,32 +364,32 @@ def create_multi_channel_plot(df, channels, sampling_rate=SAMPLING_RATE):
                 ),
                 row=i+1, col=1
             )
-    
+
     fig.update_layout(
         height=max(500, len(display_channels) * 60),
         plot_bgcolor='#1e2130',
         paper_bgcolor='#1e2130',
         font=dict(color='white', size=10),
         margin=dict(l=80, r=20, t=60, b=40),
-        title=dict(text=f"Multi-Channel View ({len(display_channels)} channels)", 
+        title=dict(text=f"Multi-Channel View ({len(display_channels)} channels)",
                    font=dict(size=12), x=0.5, xanchor='center')
     )
-    
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#2d3748', 
+
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#2d3748',
                      title_text="Time (s)", row=len(display_channels))
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#2d3748', 
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#2d3748',
                      title_text="μV", title_standoff=5)
-    
+
     return fig
 
 def create_single_channel_plot(df, channel, sampling_rate=SAMPLING_RATE):
     """Create single channel EEG plot"""
     if channel not in df.columns:
         channel = df.columns[0]
-    
+
     time_axis = np.arange(len(df)) / sampling_rate
     signal_data = df[channel].values
-    
+
     fig = go.Figure()
     fig.add_trace(go.Scattergl(
         x=time_axis,
@@ -398,7 +398,7 @@ def create_single_channel_plot(df, channel, sampling_rate=SAMPLING_RATE):
         name=channel,
         line=dict(color='#00D2FF', width=1.5)
     ))
-    
+
     fig.update_layout(
         title=f"Single Channel View - {channel}",
         xaxis_title="Time (seconds)",
@@ -409,10 +409,10 @@ def create_single_channel_plot(df, channel, sampling_rate=SAMPLING_RATE):
         height=600,
         margin=dict(l=60, r=20, t=60, b=60)
     )
-    
+
     fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#2d3748')
     fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#2d3748')
-    
+
     return fig
 
 def create_frequency_plot(data, channel, sampling_rate=SAMPLING_RATE):
@@ -427,15 +427,15 @@ def create_frequency_plot(data, channel, sampling_rate=SAMPLING_RATE):
             height=250
         )
         return fig
-    
+
     N = len(data)
     yf = fft(data[channel].values)
     xf = fftfreq(N, 1/sampling_rate)
-    
+
     positive_freq_idx = xf > 0
     xf_positive = xf[positive_freq_idx]
     yf_positive = np.abs(yf[positive_freq_idx])
-    
+
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=xf_positive[:N//4],
@@ -444,7 +444,7 @@ def create_frequency_plot(data, channel, sampling_rate=SAMPLING_RATE):
         fill='tonexty',
         line=dict(color='#FF6B6B', width=2)
     ))
-    
+
     fig.update_layout(
         title="Power Spectral Density",
         xaxis_title="Frequency (Hz)",
@@ -454,7 +454,7 @@ def create_frequency_plot(data, channel, sampling_rate=SAMPLING_RATE):
         font=dict(color='white'),
         height=250
     )
-    
+
     return fig
 
 
@@ -462,19 +462,19 @@ def create_frequency_plot(data, channel, sampling_rate=SAMPLING_RATE):
 layout = dbc.Container([
     dbc.Row([
         dbc.Col([
-            html.H2("EEG Signal Viewer & Disease Detection", 
+            html.H2("EEG Signal Viewer & Disease Detection",
                    className="mb-0",
                    style={"color": "white"}),
-            html.P("Mental Arithmetic Task Analysis Dashboard", 
-                   className="text-muted mb-3", 
+            html.P("Mental Arithmetic Task Analysis Dashboard",
+                   className="text-muted mb-3",
                    style={"color": "white"})
         ], width=8),
         dbc.Col([
-            dbc.Button("🔄 Refresh Data", id="refresh-btn", 
+            dbc.Button("🔄 Refresh Data", id="refresh-btn",
                       color="info", size="sm", className="float-end")
         ], width=4)
     ], className="mb-4"),
-    
+
     dbc.Row([
         dbc.Col([
             dbc.Card([
@@ -525,7 +525,7 @@ layout = dbc.Container([
                 ])
             ], style=CARD_STYLE)
         ], width=4),
-        
+
         dbc.Col([
             dbc.Card([
                 dbc.CardBody([
@@ -542,12 +542,12 @@ layout = dbc.Container([
                 ])
             ], style=CARD_STYLE)
         ], width=4),
-        
+
         dbc.Col([
             dbc.Card([
                 dbc.CardBody([
                     html.H6("🏥 Disease Detection", className="card-title", style={"color": "white"}),
-                    dbc.Button("Analyze", id="analyze-btn", 
+                    dbc.Button("Analyze", id="analyze-btn",
                               color="success", size="sm", className="w-100",
                               n_clicks=0),
                     dbc.Spinner(html.Div(id="analyze-status"), size="sm", color="success"),
@@ -556,14 +556,14 @@ layout = dbc.Container([
             ], style=CARD_STYLE)
         ], width=4)
     ], className="mb-4"),
-    
+
     dbc.Tooltip(
     "Already analyzed this subject. Upload or select a new one to re-enable.",
     target="analyze-btn",
     id="analyze-tooltip",
     placement="top"
     ),
-    
+
     dbc.Row([
         dbc.Col([
             dbc.Card([
@@ -573,7 +573,7 @@ layout = dbc.Container([
                 ])
             ], style=CARD_STYLE)
         ], width=3),
-        
+
         dbc.Col([
             dbc.Card([
                 dbc.CardBody([
@@ -582,7 +582,7 @@ layout = dbc.Container([
                 ])
             ], style=CARD_STYLE)
         ], width=3),
-        
+
         dbc.Col([
             dbc.Card([
                 dbc.CardBody([
@@ -591,7 +591,7 @@ layout = dbc.Container([
                 ])
             ], style=CARD_STYLE)
         ], width=3),
-        
+
         dbc.Col([
             dbc.Card([
                 dbc.CardBody([
@@ -601,7 +601,7 @@ layout = dbc.Container([
             ], style=CARD_STYLE)
         ], width=3)
     ], className="mb-4"),
-    
+
     dbc.Row([
         dbc.Col([
             dbc.Card([
@@ -610,7 +610,7 @@ layout = dbc.Container([
                 ])
             ], style=CARD_STYLE)
         ], width=8),
-        
+
         dbc.Col([
             dbc.Card([
                 dbc.CardBody([
@@ -623,14 +623,14 @@ layout = dbc.Container([
                     )
                 ])
             ], style=CARD_STYLE, className="mb-3"),
-            
+
             dbc.Card([
                 dbc.CardBody([
                     html.H6("📊 Frequency Analysis", className="card-title text-light"),
                     html.Div(id="frequency-plot")
                 ])
             ], style=CARD_STYLE, className="mb-3"),
-            
+
             dbc.Card([
                 dbc.CardBody([
                     html.H6("🔬 Analysis Results", className="card-title text-light"),
@@ -639,7 +639,7 @@ layout = dbc.Container([
             ], style=CARD_STYLE)
         ], width=4)
     ]),
-    
+
     dcc.Store(id="eeg-data-store"),
     dcc.Store(id="eeg-metadata-store"),
     dcc.Store(id="detection-results-store"),
@@ -657,7 +657,7 @@ def show_model_status(n_clicks):
     seizure_detector = SeizureDetector()
     alzheimer_detector = AlzheimerDetector()
     parkinson_detector = ParkinsonDetector()
-    
+
     return html.Div([
         html.Small(f"Seizure: {seizure_detector.status}", className="d-block"),
         html.Small(f"Alzheimer: {alzheimer_detector.status}", className="d-block"),
@@ -694,22 +694,22 @@ def set_default_channel(options):
 def handle_file_upload(contents, filename):
     if contents is None:
         return None, None
-    
+
     try:
         content_type, content_string = contents.split(',')
         decoded = base64.b64decode(content_string)
-        
+
         if not filename.lower().endswith('.edf'):
             return None, None
-        
+
         uploaded_data = {
             'filename': filename,
             'content': content_string,
             'is_uploaded': True
         }
-        
+
         return uploaded_data, None
-        
+
     except Exception as e:
         print(f"Error handling upload: {e}")
         return None, None
@@ -727,36 +727,36 @@ def load_eeg_data(file_path, uploaded_data):
     ctx = dash.callback_context
     if not ctx.triggered:
         return None, None, "No file selected", "N/A", []
-    
+
     trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    
+
     if trigger_id == "uploaded-file-store" and uploaded_data is not None:
         try:
             content_string = uploaded_data['content']
             decoded = base64.b64decode(content_string)
             filename = uploaded_data['filename']
-            
+
             with tempfile.NamedTemporaryFile(delete=False, suffix='.edf') as tmp_file:
                 tmp_file.write(decoded)
                 tmp_file_path = tmp_file.name
-            
+
             try:
                 raw = mne.io.read_raw_edf(tmp_file_path, preload=True, verbose=False)
                 sfreq = float(raw.info['sfreq'])
-                
+
                 n_samples = len(raw.times)
                 target_samples = 5000
-                
+
                 if n_samples > target_samples:
                     decim_factor = n_samples // target_samples
                     raw = raw.resample(sfreq / decim_factor)
                     sfreq = float(raw.info['sfreq'])
-                
+
                 df = raw.to_data_frame()
-                
+
                 if 'time' in df.columns:
                     df = df.drop('time', axis=1)
-                
+
                 cols = df.columns.tolist()
                 seen = {}
                 new_cols = []
@@ -768,14 +768,14 @@ def load_eeg_data(file_path, uploaded_data):
                         seen[col] = 0
                         new_cols.append(col)
                 df.columns = new_cols
-                
+
                 actual_channels = [ch for ch in df.columns if ch and ch.strip()]
-                
+
                 if not actual_channels:
                     return None, None, "❌ No valid channels", "N/A", []
-                
+
                 duration = float(raw.times[-1])
-                
+
                 metadata = {
                     'channels': actual_channels,
                     'sampling_rate': sfreq,
@@ -783,12 +783,12 @@ def load_eeg_data(file_path, uploaded_data):
                     'original_samples': n_samples,
                     'stored_samples': len(df)
                 }
-                
+
                 subject_id = filename.replace('.edf', '').replace('_annotated', '')
                 duration_str = f"{int(duration)}s"
-                
+
                 channel_options = [{"label": f"📡 {ch}", "value": ch} for ch in actual_channels]
-                
+
                 return (
                     df.to_dict('split'),
                     metadata,
@@ -796,39 +796,39 @@ def load_eeg_data(file_path, uploaded_data):
                     duration_str,
                     channel_options
                 )
-                
+
             finally:
                 try:
                     os.unlink(tmp_file_path)
                 except:
                     pass
-                
+
         except Exception as e:
             return None, None, f"❌ Upload Error: {str(e)[:30]}", "N/A", []
-    
+
     if file_path is None or file_path in ["no-directory", "no-files", "error"]:
         return None, None, "No file selected", "N/A", []
-    
+
     try:
         if not os.path.exists(file_path):
             return None, None, "❌ File not found", "N/A", []
-        
+
         raw = mne.io.read_raw_edf(file_path, preload=True, verbose=False)
         sfreq = float(raw.info['sfreq'])
-        
+
         n_samples = len(raw.times)
         target_samples = 5000
-        
+
         if n_samples > target_samples:
             decim_factor = n_samples // target_samples
             raw = raw.resample(sfreq / decim_factor)
             sfreq = float(raw.info['sfreq'])
-        
+
         df = raw.to_data_frame()
-        
+
         if 'time' in df.columns:
             df = df.drop('time', axis=1)
-        
+
         cols = df.columns.tolist()
         seen = {}
         new_cols = []
@@ -840,14 +840,14 @@ def load_eeg_data(file_path, uploaded_data):
                 seen[col] = 0
                 new_cols.append(col)
         df.columns = new_cols
-        
+
         actual_channels = [ch for ch in df.columns if ch and ch.strip()]
-        
+
         if not actual_channels:
             return None, None, "❌ No valid channels", "N/A", []
-        
+
         duration = float(raw.times[-1])
-        
+
         metadata = {
             'channels': actual_channels,
             'sampling_rate': sfreq,
@@ -855,12 +855,12 @@ def load_eeg_data(file_path, uploaded_data):
             'original_samples': n_samples,
             'stored_samples': len(df)
         }
-        
+
         subject_id = os.path.basename(file_path).replace('.edf', '').replace('_annotated', '')
         duration_str = f"{int(duration)}s"
-        
+
         channel_options = [{"label": f"📡 {ch}", "value": ch} for ch in actual_channels]
-        
+
         return (
             df.to_dict('split'),
             metadata,
@@ -868,7 +868,7 @@ def load_eeg_data(file_path, uploaded_data):
             duration_str,
             channel_options
         )
-        
+
     except Exception as e:
         return None, None, f"❌ Error: {str(e)[:30]}", "N/A", []
 
@@ -896,26 +896,26 @@ def update_main_plots(data, metadata, mode, selected_channel):
             )]
         )
         return dcc.Graph(figure=empty_fig), dcc.Graph(figure=empty_fig), "No Data", "0", "0 Hz"
-    
+
     df = pd.DataFrame(data['data'], columns=data['columns'])
     channels = metadata['channels']
     sampling_rate = metadata['sampling_rate']
-    
+
     if selected_channel not in channels:
         selected_channel = channels[0] if channels else None
-    
+
     if mode == "multi":
         main_fig = create_multi_channel_plot(df, channels, sampling_rate)
     elif mode == "single" and selected_channel:
         main_fig = create_single_channel_plot(df, selected_channel, sampling_rate)
     else:
         main_fig = create_multi_channel_plot(df, channels, sampling_rate)
-    
+
     if selected_channel and selected_channel in df.columns:
         freq_fig = create_frequency_plot(df, selected_channel, sampling_rate)
     else:
         freq_fig = create_frequency_plot(df, channels[0], sampling_rate)
-    
+
     signal_quality = "Good"
     try:
         if selected_channel and selected_channel in df.columns:
@@ -926,7 +926,7 @@ def update_main_plots(data, metadata, mode, selected_channel):
                 signal_quality = "Fair"
     except:
         signal_quality = "Unknown"
-    
+
     return (
         dcc.Graph(figure=main_fig, config=PLOT_CONFIG),
         dcc.Graph(figure=freq_fig, config=PLOT_CONFIG),
@@ -955,22 +955,22 @@ def run_disease_detection(n_clicks, data, metadata):
             None,
             False
         )
-    
+
     try:
         df = pd.DataFrame(data['data'], columns=data['columns'])
-        
+
         preprocessor = CHBMITPreprocessor()
         seizure_detector = SeizureDetector()
         alzheimer_detector = AlzheimerDetector()
         parkinson_detector = ParkinsonDetector()
-        
+
         mapped_data = preprocessor.map_channels_to_standard(df)
         segments = preprocessor.segment_data(mapped_data, window_size=1024, overlap=0.5)
-        
+
         seizure_preds = seizure_detector.predict(segments)
         alzheimer_preds = alzheimer_detector.predict(segments)
         parkinson_preds = parkinson_detector.predict(segments)
-        
+
         results = {
             'seizure': {
                 'probability': float(np.mean(seizure_preds[:, 1])),
@@ -991,7 +991,7 @@ def run_disease_detection(n_clicks, data, metadata):
                 'model': parkinson_detector.model_name
             }
         }
-        
+
         disease_probs = {
             "Seizure": results['seizure']['probability'],
             "Alzheimer's": results['alzheimer']['probability'],
@@ -1007,7 +1007,7 @@ def run_disease_detection(n_clicks, data, metadata):
         else:
             overall_status = "PERFECT HEALTH"
             status_color = "success"
-        
+
         result_components = []
         for name, res in results.items():
             progress = dbc.Progress(
@@ -1028,7 +1028,7 @@ def run_disease_detection(n_clicks, data, metadata):
                     ])
                 ], className="mb-3 shadow-sm")
             )
-        
+
         return (
             html.Div(result_components),
             overall_status,
@@ -1036,7 +1036,7 @@ def run_disease_detection(n_clicks, data, metadata):
             results,
             True
         )
-    
+
     except Exception as e:
         return (
             dbc.Alert([
@@ -1057,8 +1057,8 @@ def run_disease_detection(n_clicks, data, metadata):
 )
 def reset_analyze_button(data):
     if data is None:
-        return True  
-    return False     
+        return True
+    return False
 
 @callback(
     Output("analyze-tooltip", "is_open"),

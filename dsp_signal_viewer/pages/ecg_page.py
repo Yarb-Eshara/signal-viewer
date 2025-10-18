@@ -245,7 +245,7 @@ def update_graph_controls_visibility(graph_type):
     polar_style = {"display": "block"} if graph_type == "polar" else {"display": "none"}
     recurrence_style = {"display": "block"} if graph_type == "recurrence" else {"display": "none"}
     xor_style = {"display": "block"} if graph_type == "xor" else {"display": "none"}
-    
+
     return polar_style, recurrence_style, xor_style
 
 # --- Store updates for modes ---
@@ -290,15 +290,15 @@ def update_xor_chunk_size(size):
 def predict_ecg(n_clicks, data_json, convert_option, selected_channels):
     if data_json is None or not selected_channels:
         return "⚠️ No ECG data or channels selected.", ""
-    
+
     df = pd.read_json(data_json, orient="split")
     df.columns = [c.lower() for c in df.columns]
-    
+
     # Apply 12→3 channel conversion if selected
     if convert_option != "none" and len(selected_channels) == 12:
         df = convert_12_to_3(df, convert_option)
         selected_channels = df.columns.tolist()
-    
+
     # Keep only selected channels
     df = df[selected_channels]
 
@@ -444,13 +444,13 @@ def run_ecg_prediction(df):
 def get_looping_data(df, current_position, window_size, step):
     """Get data that loops when reaching the end"""
     total_samples = len(df)
-    
+
     if total_samples == 0:
         return pd.DataFrame(), current_position
-    
+
     # Calculate end position
     end_position = current_position + window_size
-    
+
     if end_position <= total_samples:
         # Normal case - no looping needed
         data_slice = df.iloc[current_position:end_position]
@@ -459,56 +459,56 @@ def get_looping_data(df, current_position, window_size, step):
         # Need to loop - combine end and beginning
         samples_from_end = total_samples - current_position
         samples_from_start = window_size - samples_from_end
-        
+
         part1 = df.iloc[current_position:]
         part2 = df.iloc[:samples_from_start]
-        
+
         data_slice = pd.concat([part1, part2], ignore_index=True)
         new_position = samples_from_start
-    
+
     # Ensure we don't exceed data length
     if new_position >= total_samples:
         new_position = new_position % total_samples
-    
+
     return data_slice, new_position
 
 # --- REFACTORED XOR Plot Function ---
 def create_xor_plot(df, selected_channels, chunk_size_seconds, previous_chunk_data, current_position, is_normal, fs=FS):
     chunk_size_samples = int(chunk_size_seconds * fs)
     total_samples = len(df)
-    
+
     if total_samples == 0:
         fig = go.Figure()
         fig.update_layout(title="No data available")
         return fig, None
-    
+
     # Get current chunk with looping
     current_chunk_data, _ = get_looping_data(df[selected_channels], current_position, chunk_size_samples, 0)
     current_chunk = current_chunk_data.values
-    
+
     if previous_chunk_data is None or len(previous_chunk_data) != len(current_chunk):
         # Initialize with first chunk
         fig = go.Figure()
         fig.update_layout(title="Initializing XOR plot...")
         # Store as list for JSON serialization
         return fig, current_chunk.tolist()
-    
+
     # Reconstruct previous chunk from stored data
     previous_chunk = np.array(previous_chunk_data)
-    
+
     # If patient is normal, show flat line (ICU-like display)
     if is_normal:
         # Create a flat line at zero (no XOR activity for normal ECG)
         xor_result = np.zeros_like(current_chunk)
-        
+
         # Create figure with flat lines
         fig = make_subplots(
             rows=len(selected_channels), cols=1,
             subplot_titles=[f"XOR: {ch.upper()} - NORMAL (No Activity)" for ch in selected_channels]
         )
-        
+
         time_axis = np.arange(len(xor_result)) / fs
-        
+
         for i, ch in enumerate(selected_channels):
             fig.add_trace(
                 go.Scatter(
@@ -520,7 +520,7 @@ def create_xor_plot(df, selected_channels, chunk_size_seconds, previous_chunk_da
                 ),
                 row=i+1, col=1
             )
-        
+
         fig.update_layout(
             height=250 * len(selected_channels),
             title="XOR Graph - NORMAL PATIENT (No Abnormal Activity Detected)",
@@ -535,39 +535,39 @@ def create_xor_plot(df, selected_channels, chunk_size_seconds, previous_chunk_da
             fig = go.Figure()
             fig.update_layout(title="No data available for XOR comparison")
             return fig, current_chunk.tolist()
-        
+
         # Create subplots for each channel
         fig = make_subplots(
             rows=len(selected_channels), cols=1,
             subplot_titles=[f"XOR: {ch.upper()} - ABNORMAL (Detecting Differences)" for ch in selected_channels]
         )
-        
+
         time_axis = np.arange(n) / fs
-        
+
         for i, ch in enumerate(selected_channels):
             # Get signals for this channel
             sig_a = current_chunk[:n, i]
             sig_b = previous_chunk[:n, i]
-            
+
             # Apply XOR detection algorithm from reference code
             diff = np.abs(sig_a - sig_b)
             mean_d = np.mean(diff)
             std_d = np.std(diff) + 1e-9
             z = (diff - mean_d) / std_d
-            
+
             # XOR threshold (adjustable)
             xor_thresh = 1.5
             mask_z = z > xor_thresh
-            
+
             # Sign difference detection
             sign_mask = (np.sign(sig_a) != np.sign(sig_b))
             std_a = np.std(sig_a) + 1e-9
             mask_sign = sign_mask & (diff > 0.25 * std_a)
-            
+
             # Final XOR mask
             final_mask = mask_z | mask_sign
             idxs = np.where(final_mask)[0]
-            
+
             # Plot the original signal in light gray
             fig.add_trace(
                 go.Scatter(
@@ -578,25 +578,25 @@ def create_xor_plot(df, selected_channels, chunk_size_seconds, previous_chunk_da
                 ),
                 row=i+1, col=1
             )
-            
+
             # Plot XOR detection points in red
             if len(idxs) > 0:
                 zvals = z[idxs] if idxs.size > 0 else np.array([])
                 if len(zvals) > 0:
                     # Scale marker sizes based on z-values
                     sizes = np.clip(6 + 4 * (zvals - np.min(zvals)) / (np.ptp(zvals) + 1e-9), 6, 18)
-                    
+
                     fig.add_trace(
                         go.Scatter(
                             x=time_axis[idxs], y=sig_a[idxs],
-                            mode="markers", 
+                            mode="markers",
                             marker=dict(color="red", size=sizes, opacity=0.7),
                             name=f"{ch.upper()} - XOR Hits",
                             showlegend=False
                         ),
                         row=i+1, col=1
                     )
-            
+
             # Also show the difference signal in a semi-transparent fill
             fig.add_trace(
                 go.Scatter(
@@ -609,34 +609,34 @@ def create_xor_plot(df, selected_channels, chunk_size_seconds, previous_chunk_da
                 ),
                 row=i+1, col=1
             )
-        
+
         fig.update_layout(
             height=250 * len(selected_channels),
             title=f"XOR Graph - ABNORMAL PATIENT (Detected {len(idxs)} XOR hits across channels)",
             template="plotly_white"
         )
-    
+
     return fig, current_chunk.tolist()
 
 # --- Helper: Create Recurrence Scatter Plot ---
 def create_recurrence_scatter_plot(display_data, selected_channels, colormap):
     """Create scatter plot recurrence plots for different channel configurations"""
-    
+
     n_channels = len(selected_channels)
-    
+
     if n_channels == 1:
         # Single channel: plot against itself (self-recurrence)
         ch = selected_channels[0]
         signal = display_data[ch].to_numpy()
-        
+
         # Create time-delayed version for recurrence
         delay = min(10, len(signal) // 4)  # Adaptive delay
         x_signal = signal[:-delay]
         y_signal = signal[delay:]
-        
+
         # Create color array based on time progression
         color_array = np.arange(len(x_signal))
-        
+
         fig = go.Figure(data=go.Scatter(
             x=x_signal, y=y_signal,
             mode='markers',
@@ -650,7 +650,7 @@ def create_recurrence_scatter_plot(display_data, selected_channels, colormap):
             ),
             hovertemplate=f"{ch.upper()}(t): %{{x:.2f}}<br>{ch.upper()}(t+{delay}): %{{y:.2f}}<br>Time: %{{marker.color}}<extra></extra>"
         ))
-        
+
         fig.update_layout(
             title=f"Self-Recurrence Scatter: {ch.upper()} (Time Delay: {delay} samples)",
             xaxis_title=f"{ch.upper()}(t)",
@@ -658,16 +658,16 @@ def create_recurrence_scatter_plot(display_data, selected_channels, colormap):
             height=600,
             template="plotly_white"
         )
-        
+
     elif n_channels == 2:
         # 2 channels vs 2 channels
         ch1, ch2 = selected_channels
         signal1 = display_data[ch1].to_numpy()
         signal2 = display_data[ch2].to_numpy()
-        
+
         # Create color array based on time progression
         color_array = np.arange(len(signal1))
-        
+
         fig = go.Figure(data=go.Scatter(
             x=signal1, y=signal2,
             mode='markers',
@@ -681,7 +681,7 @@ def create_recurrence_scatter_plot(display_data, selected_channels, colormap):
             ),
             hovertemplate=f"{ch1.upper()}: %{{x:.2f}}<br>{ch2.upper()}: %{{y:.2f}}<br>Time: %{{marker.color}}<extra></extra>"
         ))
-        
+
         fig.update_layout(
             title=f"Cross-Recurrence Scatter: {ch1.upper()} vs {ch2.upper()}",
             xaxis_title=f"{ch1.upper()} Signal",
@@ -689,19 +689,19 @@ def create_recurrence_scatter_plot(display_data, selected_channels, colormap):
             height=600,
             template="plotly_white"
         )
-        
+
     elif n_channels == 4:
         # 4 channels: split into 2 groups of 2
         group1 = selected_channels[:2]
         group2 = selected_channels[2:]
-        
+
         # Average signals in each group
         group1_avg = display_data[group1].mean(axis=1).to_numpy()
         group2_avg = display_data[group2].mean(axis=1).to_numpy()
-        
+
         # Create color array based on time progression
         color_array = np.arange(len(group1_avg))
-        
+
         fig = go.Figure(data=go.Scatter(
             x=group1_avg, y=group2_avg,
             mode='markers',
@@ -715,7 +715,7 @@ def create_recurrence_scatter_plot(display_data, selected_channels, colormap):
             ),
             hovertemplate=f"Group1: %{{x:.2f}}<br>Group2: %{{y:.2f}}<br>Time: %{{marker.color}}<extra></extra>"
         ))
-        
+
         fig.update_layout(
             title=f"Group Recurrence Scatter: ({', '.join([g.upper() for g in group1])}) vs ({', '.join([g.upper() for g in group2])})",
             xaxis_title=f"Average of {', '.join([g.upper() for g in group1])}",
@@ -723,19 +723,19 @@ def create_recurrence_scatter_plot(display_data, selected_channels, colormap):
             height=600,
             template="plotly_white"
         )
-        
+
     elif n_channels == 6:
         # 6 channels: split into 2 groups of 3
         group1 = selected_channels[:3]
         group2 = selected_channels[3:]
-        
+
         # Average signals in each group
         group1_avg = display_data[group1].mean(axis=1).to_numpy()
         group2_avg = display_data[group2].mean(axis=1).to_numpy()
-        
+
         # Create color array based on time progression
         color_array = np.arange(len(group1_avg))
-        
+
         fig = go.Figure(data=go.Scatter(
             x=group1_avg, y=group2_avg,
             mode='markers',
@@ -749,7 +749,7 @@ def create_recurrence_scatter_plot(display_data, selected_channels, colormap):
             ),
             hovertemplate=f"Group1: %{{x:.2f}}<br>Group2: %{{y:.2f}}<br>Time: %{{marker.color}}<extra></extra>"
         ))
-        
+
         fig.update_layout(
             title=f"Group Recurrence Scatter: ({', '.join([g.upper() for g in group1])}) vs ({', '.join([g.upper() for g in group2])})",
             xaxis_title=f"Average of {', '.join([g.upper() for g in group1])}",
@@ -757,20 +757,20 @@ def create_recurrence_scatter_plot(display_data, selected_channels, colormap):
             height=600,
             template="plotly_white"
         )
-        
+
     else:
         # For other numbers of channels, use flexible grouping
         mid_point = n_channels // 2
         group1 = selected_channels[:mid_point]
         group2 = selected_channels[mid_point:]
-        
+
         # Average signals in each group
         group1_avg = display_data[group1].mean(axis=1).to_numpy()
         group2_avg = display_data[group2].mean(axis=1).to_numpy()
-        
+
         # Create color array based on time progression
         color_array = np.arange(len(group1_avg))
-        
+
         fig = go.Figure(data=go.Scatter(
             x=group1_avg, y=group2_avg,
             mode='markers',
@@ -784,7 +784,7 @@ def create_recurrence_scatter_plot(display_data, selected_channels, colormap):
             ),
             hovertemplate=f"Group1: %{{x:.2f}}<br>Group2: %{{y:.2f}}<br>Time: %{{marker.color}}<extra></extra>"
         ))
-        
+
         fig.update_layout(
             title=f"Group Recurrence Scatter: ({', '.join([g.upper() for g in group1])}) vs ({', '.join([g.upper() for g in group2])})",
             xaxis_title=f"Average of {', '.join([g.upper() for g in group1])}",
@@ -792,7 +792,7 @@ def create_recurrence_scatter_plot(display_data, selected_channels, colormap):
             height=600,
             template="plotly_white"
         )
-    
+
     return fig
 
 # --- Main callback for graph updates ---
@@ -819,16 +819,16 @@ def create_recurrence_scatter_plot(display_data, selected_channels, colormap):
     State("ecg-prediction-result", "data"),
     prevent_initial_call=True
 )
-def update_live(n_intervals, upload_contents, selected_channels, convert_option, start_time, is_running, data_json, 
-                graph_type, previous_chunk, polar_mode, recurrence_mode, 
+def update_live(n_intervals, upload_contents, selected_channels, convert_option, start_time, is_running, data_json,
+                graph_type, previous_chunk, polar_mode, recurrence_mode,
                 colormap, xor_chunk_size, time_window, current_position, prediction_result):
-    
+
     # Use callback context to determine which input triggered the callback
     ctx = dash.callback_context
     triggered_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
-    
-    line_width = 1.5 
-    
+
+    line_width = 1.5
+
     # If no data or channels selected, return empty figure
     if data_json is None or not selected_channels:
         fig = go.Figure()
@@ -850,7 +850,7 @@ def update_live(n_intervals, upload_contents, selected_channels, convert_option,
 
     total_samples = df.shape[0]
     current_window_size = int(time_window * FS)
-    
+
     # Only update position if the interval triggered the callback and is running
     if triggered_id == "interval" and is_running:
         # Get data with looping and update position
@@ -859,7 +859,7 @@ def update_live(n_intervals, upload_contents, selected_channels, convert_option,
     else:
         # For other triggers (like upload), just get current data without updating position
         data_slice, _ = get_looping_data(df, current_position, current_window_size, 0)
-    
+
     t_window = np.arange(len(data_slice)) / FS
 
     new_previous_chunk = previous_chunk
@@ -883,7 +883,7 @@ def update_live(n_intervals, upload_contents, selected_channels, convert_option,
             fig.update_xaxes(row=i+1, col=1, tickfont=dict(size=9, color="black"))
             fig.update_yaxes(row=i+1, col=1, tickfont=dict(size=9, color="black"),
                              title_standoff=50)
-        
+
         fig.update_layout(
             height=250 * len(selected_channels),
             template="plotly_white",
@@ -903,7 +903,7 @@ def update_live(n_intervals, upload_contents, selected_channels, convert_option,
         fig = make_subplots(rows=rows, cols=1,
                             subplot_titles=[f"{ch.upper()}<br><br>" for ch in selected_channels],
                             specs=specs)
-        
+
         for ann in fig['layout']['annotations']:
             ann['y'] += 0.01
 
@@ -915,7 +915,7 @@ def update_live(n_intervals, upload_contents, selected_channels, convert_option,
                 # Cumulative - show all data up to current position
                 cumulative_data, _ = get_looping_data(df[selected_channels], 0, current_position + current_window_size, 0)
                 y = cumulative_data[ch].iloc[::DOWNSAMPLE].to_numpy()
-                
+
             theta = np.linspace(0, 360, len(y), endpoint=False)
             fig.add_trace(
                 go.Scatterpolar(r=y, theta=theta, mode="lines",
@@ -944,7 +944,7 @@ def update_live(n_intervals, upload_contents, selected_channels, convert_option,
             display_data, _ = get_looping_data(df, 0, current_position + current_window_size, 0)
 
         display_data = display_data.iloc[::DOWNSAMPLE]
-        
+
         # Create scatter plot recurrence
         fig = create_recurrence_scatter_plot(display_data, selected_channels, colormap)
 

@@ -7,13 +7,11 @@ import torch
 import librosa
 import numpy as np
 from transformers import AutoModelForAudioClassification, AutoProcessor
-import soundfile as sf
 import plotly.graph_objects as go
-import os
 
-# =====================
+# ==========================================================
 # Constants & Styles
-# =====================
+# ==========================================================
 CARD_STYLE = {
     'backgroundColor': '#1e2130',
     'border': '1px solid #2d3748',
@@ -27,7 +25,6 @@ PLOT_CONFIG = {
     'modeBarButtonsToRemove': ['pan2d', 'lasso2d', 'select2d', 'autoScale2d']
 }
 
-# Dark mode default empty figure
 def empty_dark_fig():
     fig = go.Figure()
     fig.update_layout(
@@ -39,43 +36,24 @@ def empty_dark_fig():
     )
     return fig
 
-# =====================
+# ==========================================================
 # Load Model
-# =====================
+# ==========================================================
 model_name = "preszzz/drone-audio-detection-05-12"
 processor = AutoProcessor.from_pretrained(model_name)
 model = AutoModelForAudioClassification.from_pretrained(model_name)
 model.eval()
 print("Model loaded successfully!")
 
-# =====================
+# ==========================================================
 # Helper Functions
-# =====================
-
-def pad_or_repeat_audio(file_path, target_duration_sec=3, padded_folder=r"assets/padded_sounds"):
-    # Make sure the padded folder exists
-    os.makedirs(padded_folder, exist_ok=True)
-
-    # Create padded file path in the padded folder
-    base_name = os.path.basename(file_path).replace(".wav", "-padded.wav")
-    padded_file_path = os.path.join(padded_folder, base_name)
-
-    # If already exists, just return it
-    if os.path.exists(padded_file_path):
-        return padded_file_path
-
-    # Read original audio
-    data, sr = sf.read(file_path)
-    desired_length = sr * target_duration_sec
-
-    # Repeat or pad if too short
-    if len(data) < desired_length:
-        repeats = int(np.ceil(desired_length / len(data)))
-        data = np.tile(data, repeats)[:desired_length]
-
-    # Write padded file once
-    sf.write(padded_file_path, data, sr)
-    return padded_file_path
+# ==========================================================
+def pad_waveform(waveform, target_length):
+    """Pad or repeat waveform to target length."""
+    if len(waveform) < target_length:
+        repeats = int(np.ceil(target_length / len(waveform)))
+        waveform = np.tile(waveform, repeats)[:target_length]
+    return waveform
 
 def create_waveform_plot(file_path):
     data, sr = librosa.load(file_path, sr=None)
@@ -92,23 +70,12 @@ def create_waveform_plot(file_path):
     )
     return fig
 
-# =====================
-# Predefined sounds
-# =====================
-BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-SOUNDS_FOLDER = os.path.join(BASE_DIR, "assets", "sounds")
-sound_files = [f for f in os.listdir(SOUNDS_FOLDER) if f.endswith(".wav")]
-
-# Only use original filenames in dropdown
-sound_options = [{"label": f, "value": os.path.join(SOUNDS_FOLDER, f)} for f in sound_files]
-
-# =====================
-# Layout
-# =====================
+# ==========================================================
+# Page Layout
+# ==========================================================
 dash.register_page(__name__, path="/drone", name="Drone Detection")
 
 layout = dbc.Container([
-    # Header with GIF on the right
     dbc.Row([
         dbc.Col([
             html.Div([
@@ -124,14 +91,12 @@ layout = dbc.Container([
         ])
     ], className="mb-4"),
 
-    # Upload & Controls + Dropdown
     dbc.Row([
         dbc.Col([
             dbc.Card([
                 dbc.CardBody([
-                    html.H6("🔊 Upload or Select Sound", style={"color": "white"}),
+                    html.H6("🔊 Upload Sound", style={"color": "white"}),
 
-                    # Upload
                     dcc.Upload(
                         id="upload-sound-machine",
                         children=html.Div(["📂 Drag or click to upload wav/mp3"]),
@@ -140,28 +105,11 @@ layout = dbc.Container([
                             "borderWidth": "1px", "borderStyle": "dashed",
                             "borderRadius": "5px", "textAlign": "center",
                             "color": "white",
-                            "backgroundColor":"#182940"
+                            "backgroundColor": "#182940"
                         }
                     ),
                     html.Br(),
 
-                    # Dropdown (dark-themed)
-                    dcc.Dropdown(
-                        id="dropdown-sounds",
-                        options=sound_options,
-                        placeholder="Or select a predefined sound",
-                        style={
-                            "backgroundColor": "#1e2130",
-                            "color": "white",
-                            "border": "1px solid #2d3748",
-                            "borderRadius": "5px",
-                            "padding": "5px"
-                        },
-                        className="dark-dropdown"
-                    ),
-                    html.Br(),
-
-                    # Audio player
                     html.Div(
                         html.Audio(id="audio-player", controls=True, style={
                             "width": "100%",
@@ -172,11 +120,9 @@ layout = dbc.Container([
                     ),
                     html.Br(),
 
-                    # Remove button
                     dbc.Button("Remove", id="remove-button", color="danger", className="w-100", n_clicks=0),
                     html.Br(), html.Br(),
 
-                    # Predict button
                     dbc.Button("Predict", id="predict-button", color="primary", disabled=True, className="w-100"),
                     html.Br(), html.Br(),
 
@@ -185,7 +131,6 @@ layout = dbc.Container([
             ], style=CARD_STYLE)
         ], width=4),
 
-        # Visualization Cards
         dbc.Col([
             dbc.Card([
                 dbc.CardBody([
@@ -203,29 +148,26 @@ layout = dbc.Container([
         ], width=8)
     ]),
 
-    # Hidden Store
     dcc.Store(id="uploaded-file-path", data=None)
 ], fluid=True, style={'backgroundColor': '#182940', 'minHeight': '100vh', 'padding': '20px'})
 
-# =====================
+# ==========================================================
 # Callbacks
-# =====================
+# ==========================================================
 @dash.callback(
     Output("audio-player", "src", allow_duplicate=True),
     Output("waveform-plot", "figure", allow_duplicate=True),
     Output("predict-button", "disabled", allow_duplicate=True),
     Output("uploaded-file-path", "data", allow_duplicate=True),
     Input("upload-sound-machine", "contents"),
-    Input("dropdown-sounds", "value"),
     Input("remove-button", "n_clicks"),
     State("upload-sound-machine", "filename"),
     prevent_initial_call=True
 )
-def update_audio(contents, dropdown_value, remove_clicks, filename):
+def update_audio(contents, remove_clicks, filename):
     ctx = dash.callback_context
     triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
 
-    # Remove button clicked
     if triggered_id == "remove-button":
         return None, empty_dark_fig(), True, None
 
@@ -236,8 +178,6 @@ def update_audio(contents, dropdown_value, remove_clicks, filename):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
             tmp_file.write(decoded)
             file_path = tmp_file.name
-    elif dropdown_value is not None:
-        file_path = dropdown_value
 
     if file_path is None:
         return None, empty_dark_fig(), True, None
@@ -245,6 +185,7 @@ def update_audio(contents, dropdown_value, remove_clicks, filename):
     audio_src = f"data:audio/wav;base64,{base64.b64encode(open(file_path, 'rb').read()).decode()}"
     fig = create_waveform_plot(file_path)
     return audio_src, fig, False, file_path
+
 
 @dash.callback(
     Output("sound-machine-output", "children"),
@@ -255,16 +196,19 @@ def update_audio(contents, dropdown_value, remove_clicks, filename):
 )
 def handle_predict(n_clicks, file_path):
     if not file_path:
-        return dbc.Alert("No file uploaded or selected.", color="warning"), empty_dark_fig()
+        return dbc.Alert("No file uploaded.", color="warning"), empty_dark_fig()
 
     try:
-        file_path = pad_or_repeat_audio(file_path, target_duration_sec=3)
         waveform, sr = librosa.load(file_path, sr=16000, mono=True)
-        waveform = torch.tensor(waveform).unsqueeze(0)
-        inputs = processor(waveform, sampling_rate=16000, return_tensors="pt", padding=True)
+        waveform = pad_waveform(waveform, target_length=16000 * 3)
+        waveform = waveform.astype(np.float32)
+
+        inputs = processor(waveform.tolist(), sampling_rate=16000, return_tensors="pt", padding=True)
+
         with torch.no_grad():
             logits = model(**inputs).logits
 
+        # Get real probabilities
         probs = torch.softmax(logits, dim=-1).squeeze().numpy()
         labels = [model.config.id2label[i] for i in range(len(probs))]
         top_indices = probs.argsort()[-3:][::-1]
@@ -272,27 +216,31 @@ def handle_predict(n_clicks, file_path):
         top_labels = [labels[i] for i in top_indices]
 
         predicted_label = top_labels[0]
-        confidence = top_probs[0]
-        color = "green" if predicted_label.lower() == "drone" else "red"
-        alert = dbc.Alert(f"Prediction: {predicted_label} (Confidence: {confidence:.6f})", color=color)
+        confidence = top_probs[0] * 100  # Show real percentage
+        color = "success" if predicted_label.lower() == "drone" else "danger"
 
-        # Bar chart with half-width bars
+        alert = dbc.Alert(
+            f"🎯 Prediction: {predicted_label} (Confidence: {confidence:.6f}%)",
+            color=color
+        )
+
         fig = go.Figure()
         fig.add_trace(go.Bar(
             x=top_labels,
             y=top_probs,
             width=[0.3]*3,
-            marker_color=['green' if i==0 else 'lightblue' for i in range(3)]
+            marker_color=['green' if i == 0 else 'lightblue' for i in range(3)]
         ))
         fig.update_layout(
-            title="",
-            yaxis=dict(title="Probability", range=[0,1]),
-            xaxis=dict(title=""),
+            title="Prediction Confidence",
+            yaxis=dict(title="Probability", range=[0, 1]),
+            xaxis=dict(title="Labels"),
             plot_bgcolor='#1e2130',
             paper_bgcolor='#1e2130',
             font=dict(color='white')
         )
 
         return alert, fig
+
     except Exception as e:
         return dbc.Alert(f"Error processing file: {str(e)}", color="danger"), empty_dark_fig()
