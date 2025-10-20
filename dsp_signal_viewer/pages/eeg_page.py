@@ -25,7 +25,7 @@ TORCHEEG_AVAILABLE = True
 
 dash.register_page(__name__, path="/eeg", name="EEG")
 
-BASE_DIR = os.path.dirname(os.path.dirname(__file__))  # dsp_signal_viewer/
+BASE_DIR = os.path.dirname(os.path.dirname(__file__)) 
 SEIZURE_MODEL_PATH = os.path.join(BASE_DIR, "models", "CHB_MIT_sz_detec_demo.h5")
 BASE_DIR_data = Path(__file__).resolve().parents[2]
 DATA_DIRECTORY = os.path.join(BASE_DIR_data, "data", "Annotated_EEG")
@@ -40,7 +40,6 @@ CARD_STYLE = {
 PLOT_CONFIG = {'displayModeBar': False, 'displaylogo': False}
 SAMPLING_RATE = 256
 
-# H5 Model for Seizure Detection
 class H5SeizureDetector:
     def __init__(self, model_path=SEIZURE_MODEL_PATH):
         if not TF_AVAILABLE:
@@ -56,28 +55,37 @@ class H5SeizureDetector:
         except Exception as e:
             raise Exception(f"Failed to load model: {str(e)}")
 
-        # Get model input shape to understand expected dimensions
         self.input_shape = self.model.input_shape
         print(f"Model input shape: {self.input_shape}")
-
         self.scaler = StandardScaler()
 
     def preprocess(self, segments):
         """Preprocess segments for the H5 model"""
-        # segments: (batch, timesteps, channels)
+        # Input: segments shape = (n_segments, timesteps, n_channels)
+        # Model expects: (batch, channels, timesteps, 1)
         n_segments, timesteps, n_channels = segments.shape
 
-        # Model expects 18 channels, so adjust if needed
+        # Expected channels from model input shape: (None, 18, 1024, 1)
         expected_channels = self.input_shape[1]
+        expected_timesteps = self.input_shape[2]
+        
+        # Adjust channels
         if n_channels > expected_channels:
-            # Take first 18 channels
             segments = segments[:, :, :expected_channels]
             n_channels = expected_channels
         elif n_channels < expected_channels:
-            # Pad with zeros
             padding = np.zeros((n_segments, timesteps, expected_channels - n_channels))
             segments = np.concatenate([segments, padding], axis=2)
             n_channels = expected_channels
+
+        # Adjust timesteps if needed
+        if timesteps > expected_timesteps:
+            segments = segments[:, :expected_timesteps, :]
+            timesteps = expected_timesteps
+        elif timesteps < expected_timesteps:
+            padding = np.zeros((n_segments, expected_timesteps - timesteps, n_channels))
+            segments = np.concatenate([segments, padding], axis=1)
+            timesteps = expected_timesteps
 
         # Normalize each channel separately
         segments_normalized = np.zeros_like(segments)
@@ -85,11 +93,12 @@ class H5SeizureDetector:
             channel_data = segments[:, :, i].reshape(-1, 1)
             segments_normalized[:, :, i] = self.scaler.fit_transform(channel_data).reshape(n_segments, timesteps)
 
-        # Model expects: (batch, channels, timesteps, 1)
-        # Current: (batch, timesteps, channels)
-        # Transform: transpose then add dimension
-        tensor = segments_normalized.transpose(0, 2, 1)  # (batch, channels, timesteps)
-        tensor = np.expand_dims(tensor, axis=-1)  # (batch, channels, timesteps, 1)
+        # Transform to model expected shape: (batch, channels, timesteps, 1)
+        # Current shape: (n_segments, timesteps, n_channels)
+        # Step 1: Transpose to (n_segments, n_channels, timesteps)
+        tensor = segments_normalized.transpose(0, 2, 1)
+        # Step 2: Add channel dimension at the end: (n_segments, n_channels, timesteps, 1)
+        tensor = np.expand_dims(tensor, axis=-1)
 
         return tensor.astype(np.float32)
 
@@ -99,24 +108,19 @@ class H5SeizureDetector:
             x = self.preprocess(segments)
             predictions = self.model.predict(x, verbose=0)
 
-            # Handle different output formats
             if predictions.shape[1] == 1:
-                # Binary classification with single output
                 seizure_probs = predictions.flatten()
                 normal_probs = 1 - seizure_probs
                 return np.column_stack([normal_probs, seizure_probs])
             else:
-                # Multi-class output
                 return predictions
 
         except Exception as e:
             print(f"Prediction error: {e}")
-            # Fallback to random predictions
             n_segments = len(segments)
             return np.random.rand(n_segments, 2)
 
 
-# Keep the existing Alzheimer and Parkinson detectors
 class TorchEEGAlzheimerDetector:
     """Alzheimer's detector using TorchEEG's TSCeption architecture"""
     def __init__(self, n_channels=18):
@@ -125,6 +129,7 @@ class TorchEEGAlzheimerDetector:
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model_name = "TSCeption (TorchEEG)"
+        self.n_channels = n_channels
 
         self.model = TSCeption(
             num_electrodes=n_channels,
@@ -154,10 +159,20 @@ class TorchEEGAlzheimerDetector:
     def preprocess(self, segments):
         n_segments, timesteps, n_channels = segments.shape
 
+        # Ensure we have the right number of channels
+        if n_channels != self.n_channels:
+            if n_channels > self.n_channels:
+                segments = segments[:, :, :self.n_channels]
+            else:
+                padding = np.zeros((n_segments, timesteps, self.n_channels - n_channels))
+                segments = np.concatenate([segments, padding], axis=2)
+            n_channels = self.n_channels
+
         segments_reshaped = segments.reshape(-1, n_channels)
         segments_normalized = self.scaler.fit_transform(segments_reshaped)
         segments_normalized = segments_normalized.reshape(n_segments, timesteps, n_channels)
 
+        # TSCeption expects: (batch, 1, channels, timesteps)
         tensor = torch.FloatTensor(segments_normalized).unsqueeze(1).permute(0, 1, 3, 2)
         return tensor.to(self.device)
 
@@ -178,15 +193,15 @@ class TorchEEGParkinsonDetector:
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model_name = "FBCCNN (TorchEEG)"
+        self.n_channels = n_channels
 
-        self.model = FBCCNN(
-            num_classes=2,
-            num_electrodes=n_channels,
+        # FBCCNN expects input with specific channel dimensions
+        # Let's use a simpler approach with EEGNet which is more flexible
+        self.model = EEGNet(
             chunk_size=1024,
-            dropout=0.5,
-            F1=128,
-            F2=256,
-            D=2
+            num_electrodes=n_channels,
+            num_classes=2,
+            dropout=0.5
         ).to(self.device)
 
         self._initialize_weights()
@@ -208,10 +223,20 @@ class TorchEEGParkinsonDetector:
     def preprocess(self, segments):
         n_segments, timesteps, n_channels = segments.shape
 
+        # Ensure we have the right number of channels
+        if n_channels != self.n_channels:
+            if n_channels > self.n_channels:
+                segments = segments[:, :, :self.n_channels]
+            else:
+                padding = np.zeros((n_segments, timesteps, self.n_channels - n_channels))
+                segments = np.concatenate([segments, padding], axis=2)
+            n_channels = self.n_channels
+
         segments_reshaped = segments.reshape(-1, n_channels)
         segments_normalized = self.scaler.fit_transform(segments_reshaped)
         segments_normalized = segments_normalized.reshape(n_segments, timesteps, n_channels)
 
+        # EEGNet expects: (batch, 1, channels, timesteps)
         tensor = torch.FloatTensor(segments_normalized).unsqueeze(1).permute(0, 1, 3, 2)
         return tensor.to(self.device)
 
@@ -228,7 +253,6 @@ class CHBMITPreprocessor:
     """Preprocessor for CHB-MIT EEG dataset"""
     def __init__(self, fs=256):
         self.fs = fs
-        # Use 18 channels to match the seizure detection model
         self.standard_channels = [
             'Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8',
             'C3', 'Cz', 'C4', 'P3', 'Pz', 'P4',
@@ -271,7 +295,6 @@ class CHBMITPreprocessor:
         return np.array(segments)
 
 
-# Updated wrapper classes
 class SeizureDetector:
     def __init__(self):
         try:
@@ -287,7 +310,7 @@ class SeizureDetector:
     def predict(self, segments):
         if self.detector:
             return self.detector.predict(segments)
-        return np.random.rand(len(segments), 2)  # Fallback
+        return np.random.rand(len(segments), 2)
 
 
 class AlzheimerDetector:
@@ -314,7 +337,13 @@ class ParkinsonDetector:
         return np.random.rand(len(segments), 2)
 
 
-# The rest of your existing functions remain the same...
+def downsample_dataframe(df, factor):
+    """Downsample dataframe by taking every nth sample"""
+    if factor == 1:
+        return df
+    return df.iloc[::factor].reset_index(drop=True)
+
+
 def load_eeg_files():
     try:
         all_files = os.listdir(DATA_DIRECTORY)
@@ -458,7 +487,6 @@ def create_frequency_plot(data, channel, sampling_rate=SAMPLING_RATE):
     return fig
 
 
-# Layout and callbacks remain the same...
 layout = dbc.Container([
     dbc.Row([
         dbc.Col([
@@ -557,6 +585,30 @@ layout = dbc.Container([
         ], width=4)
     ], className="mb-4"),
 
+    # NEW: Downsampling Slider Row
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    html.H6("⚙️ Signal Downsampling", className="card-title", style={"color": "white"}),
+                    html.Div([
+                        html.Small("Downsample Factor:", className="text-muted d-block mb-2"),
+                        dcc.Slider(
+                            id="downsample-slider",
+                            min=1,
+                            max=10,
+                            step=1,
+                            value=1,
+                            marks={i: f"{i}x" for i in range(1, 11)},
+                            tooltip={"placement": "bottom", "always_visible": True}
+                        ),
+                        html.Div(id="downsample-info", className="text-info mt-2 text-center")
+                    ])
+                ])
+            ], style=CARD_STYLE)
+        ], width=12)
+    ], className="mb-4"),
+
     dbc.Tooltip(
     "Already analyzed this subject. Upload or select a new one to re-enable.",
     target="analyze-btn",
@@ -578,7 +630,7 @@ layout = dbc.Container([
             dbc.Card([
                 dbc.CardBody([
                     html.H4(id="sampling-rate-display", className="text-info mb-0"),
-                    html.Small("Sampling Rate", className="text-muted")
+                    html.Small("Effective Sampling Rate", className="text-muted")
                 ])
             ], style=CARD_STYLE)
         ], width=3),
@@ -644,6 +696,7 @@ layout = dbc.Container([
     dcc.Store(id="eeg-metadata-store"),
     dcc.Store(id="detection-results-store"),
     dcc.Store(id="uploaded-file-store"),
+    dcc.Store(id="original-data-store"),  # NEW: Store original undownsampled data
     dcc.Interval(id="interval-component", interval=1000, n_intervals=0, max_intervals=1)
 ], fluid=True, style={'backgroundColor': '#182940', 'minHeight': '100vh', 'padding': '20px'})
 
@@ -664,7 +717,6 @@ def show_model_status(n_clicks):
         html.Small(f"Parkinson: {parkinson_detector.status}", className="d-block")
     ])
 
-# The rest of your existing callbacks remain the same...
 @callback(
     Output("file-selector", "options"),
     [Input("refresh-btn", "n_clicks"),
@@ -714,8 +766,9 @@ def handle_file_upload(contents, filename):
         print(f"Error handling upload: {e}")
         return None, None
 
+# MODIFIED: Load and store original data
 @callback(
-    [Output("eeg-data-store", "data"),
+    [Output("original-data-store", "data"),
      Output("eeg-metadata-store", "data"),
      Output("subject-info", "children"),
      Output("duration-info", "children"),
@@ -872,6 +925,29 @@ def load_eeg_data(file_path, uploaded_data):
     except Exception as e:
         return None, None, f"❌ Error: {str(e)[:30]}", "N/A", []
 
+
+# NEW: Apply downsampling to create eeg-data-store
+@callback(
+    [Output("eeg-data-store", "data"),
+     Output("downsample-info", "children")],
+    [Input("original-data-store", "data"),
+     Input("downsample-slider", "value")],
+    State("eeg-metadata-store", "data")
+)
+def apply_downsampling(original_data, downsample_factor, metadata):
+    if original_data is None or metadata is None:
+        return None, ""
+    
+    df_original = pd.DataFrame(original_data['data'], columns=original_data['columns'])
+    
+    df_downsampled = downsample_dataframe(df_original, downsample_factor)
+    
+    effective_srate = metadata['sampling_rate'] / downsample_factor
+    info_text = f"Original: {len(df_original)} samples @ {metadata['sampling_rate']:.1f} Hz → Downsampled: {len(df_downsampled)} samples @ {effective_srate:.1f} Hz"
+    
+    return df_downsampled.to_dict('split'), info_text
+
+
 @callback(
     [Output("main-eeg-plot", "children"),
      Output("frequency-plot", "children"),
@@ -881,9 +957,10 @@ def load_eeg_data(file_path, uploaded_data):
     [Input("eeg-data-store", "data"),
      Input("eeg-metadata-store", "data"),
      Input("eeg-mode", "value"),
-     Input("channel-selector", "value")]
+     Input("channel-selector", "value"),
+     Input("downsample-slider", "value")]
 )
-def update_main_plots(data, metadata, mode, selected_channel):
+def update_main_plots(data, metadata, mode, selected_channel, downsample_factor):
     if data is None or metadata is None:
         empty_fig = go.Figure().update_layout(
             plot_bgcolor='#1e2130', paper_bgcolor='#1e2130',
@@ -899,7 +976,7 @@ def update_main_plots(data, metadata, mode, selected_channel):
 
     df = pd.DataFrame(data['data'], columns=data['columns'])
     channels = metadata['channels']
-    sampling_rate = metadata['sampling_rate']
+    sampling_rate = metadata['sampling_rate'] / downsample_factor
 
     if selected_channel not in channels:
         selected_channel = channels[0] if channels else None
@@ -935,6 +1012,7 @@ def update_main_plots(data, metadata, mode, selected_channel):
         f"{int(sampling_rate)} Hz"
     )
 
+
 @callback(
     [Output("detection-results", "children"),
      Output("prediction-confidence", "children"),
@@ -943,10 +1021,11 @@ def update_main_plots(data, metadata, mode, selected_channel):
      Output("analyze-btn", "disabled")],
     Input("analyze-btn", "n_clicks"),
     [State("eeg-data-store", "data"),
-     State("eeg-metadata-store", "data")],
+     State("eeg-metadata-store", "data"),
+     State("downsample-slider", "value")],
     prevent_initial_call=True
 )
-def run_disease_detection(n_clicks, data, metadata):
+def run_disease_detection(n_clicks, data, metadata, downsample_factor):
     if n_clicks == 0 or data is None or metadata is None:
         return (
             html.Div("Click 'Analyze' to run detection", className="text-muted"),
@@ -992,45 +1071,69 @@ def run_disease_detection(n_clicks, data, metadata):
             }
         }
 
+        # Find disease with highest probability that exceeds 50%
         disease_probs = {
             "Seizure": results['seizure']['probability'],
             "Alzheimer's": results['alzheimer']['probability'],
             "Parkinson's": results['parkinson']['probability']
         }
 
+        # Get the disease with maximum probability
         top_disease = max(disease_probs, key=disease_probs.get)
         top_prob = disease_probs[top_disease]
 
+        # Determine display based on threshold
         if top_prob > 0.5:
-            overall_status = f"HIGH RISK of {top_disease}"
+            overall_status = f"⚠️ {top_disease} Detected"
             status_color = "danger"
+            main_message = html.Div([
+                html.H4(f"🚨 HIGH RISK: {top_disease}", className="text-danger mb-3"),
+                html.P(f"Confidence: {top_prob*100:.1f}%", className="text-warning"),
+                html.Hr(),
+                html.Small(f"Downsampling Factor: {downsample_factor}x", className="text-muted")
+            ])
         else:
-            overall_status = "PERFECT HEALTH"
+            overall_status = "✅ Healthy"
             status_color = "success"
+            main_message = html.Div([
+                html.H4("✨ PERFECT HEALTH", className="text-success mb-3"),
+                html.P("No conditions detected above threshold", className="text-info"),
+                html.Hr(),
+                html.Small(f"Downsampling Factor: {downsample_factor}x", className="text-muted")
+            ])
 
-        result_components = []
+        # Show detailed breakdown for all diseases
+        detailed_results = []
         for name, res in results.items():
-            progress = dbc.Progress(
-                value=res['probability'] * 100,
-                color="danger" if res['probability'] > 0.5 else "success",
-                className="mb-2",
-                label=f"{res['probability']*100:.1f}%"
-            )
-            result_components.append(
+            color = "danger" if res['probability'] > 0.5 else "success"
+            detailed_results.append(
                 dbc.Card([
-                    dbc.CardHeader([
-                        html.Span(name.capitalize(), className="me-2"),
-                        html.Small(f"({res['model']})", className="text-muted")
-                    ]),
                     dbc.CardBody([
-                        html.P(f"Segments Detected: {res['segments_detected']}/{res['total_segments']}"),
-                        progress
+                        html.Div([
+                            html.Strong(name.capitalize()),
+                            html.Span(f" - {res['probability']*100:.1f}%", 
+                                    className=f"float-end text-{color}")
+                        ]),
+                        dbc.Progress(
+                            value=res['probability'] * 100,
+                            color=color,
+                            className="mt-2"
+                        ),
+                        html.Small(f"{res['segments_detected']}/{res['total_segments']} segments", 
+                                 className="text-muted")
                     ])
-                ], className="mb-3 shadow-sm")
+                ], className="mb-2")
             )
+
+        final_display = html.Div([
+            main_message,
+            html.Hr(),
+            html.H6("Detailed Analysis:", className="mt-3 mb-2"),
+            html.Div(detailed_results)
+        ])
 
         return (
-            html.Div(result_components),
+            final_display,
             overall_status,
             html.Small("Analysis complete!", className="text-success"),
             results,
