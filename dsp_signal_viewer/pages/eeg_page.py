@@ -1071,7 +1071,7 @@ def run_disease_detection(n_clicks, data, metadata, downsample_factor):
             }
         }
 
-        # Find disease with highest probability that exceeds 50%
+        # Find disease with highest probability
         disease_probs = {
             "Seizure": results['seizure']['probability'],
             "Alzheimer's": results['alzheimer']['probability'],
@@ -1085,55 +1085,31 @@ def run_disease_detection(n_clicks, data, metadata, downsample_factor):
         # Determine display based on threshold
         if top_prob > 0.5:
             overall_status = f"⚠️ {top_disease} Detected"
-            status_color = "danger"
+            # Get the disease key for results dictionary
+            disease_key = top_disease.lower().replace("'s", "")
             main_message = html.Div([
                 html.H4(f"🚨 HIGH RISK: {top_disease}", className="text-danger mb-3"),
-                html.P(f"Confidence: {top_prob*100:.1f}%", className="text-warning"),
+                html.P(f"Confidence: {top_prob*100:.1f}%", className="text-warning fs-5 fw-bold"),
                 html.Hr(),
-                html.Small(f"Downsampling Factor: {downsample_factor}x", className="text-muted")
+                html.Small(f"Segments detected: {results[disease_key]['segments_detected']}/{results[disease_key]['total_segments']}", 
+                          className="text-muted d-block"),
+                html.Small(f"Model: {results[disease_key]['model']}", 
+                          className="text-muted d-block"),
+                html.Small(f"Downsampling: {downsample_factor}x", className="text-muted d-block mt-2")
             ])
         else:
             overall_status = "✅ Healthy"
-            status_color = "success"
             main_message = html.Div([
-                html.H4("✨ PERFECT HEALTH", className="text-success mb-3"),
-                html.P("No conditions detected above threshold", className="text-info"),
+                html.H4("✨ NO CONDITION DETECTED", className="text-success mb-3"),
+                html.P("All probabilities below threshold", className="text-info"),
                 html.Hr(),
-                html.Small(f"Downsampling Factor: {downsample_factor}x", className="text-muted")
+                html.Small(f"Highest probability: {top_disease} ({top_prob*100:.1f}%)", 
+                          className="text-muted d-block"),
+                html.Small(f"Downsampling: {downsample_factor}x", className="text-muted d-block mt-2")
             ])
 
-        # Show detailed breakdown for all diseases
-        detailed_results = []
-        for name, res in results.items():
-            color = "danger" if res['probability'] > 0.5 else "success"
-            detailed_results.append(
-                dbc.Card([
-                    dbc.CardBody([
-                        html.Div([
-                            html.Strong(name.capitalize()),
-                            html.Span(f" - {res['probability']*100:.1f}%", 
-                                    className=f"float-end text-{color}")
-                        ]),
-                        dbc.Progress(
-                            value=res['probability'] * 100,
-                            color=color,
-                            className="mt-2"
-                        ),
-                        html.Small(f"{res['segments_detected']}/{res['total_segments']} segments", 
-                                 className="text-muted")
-                    ])
-                ], className="mb-2")
-            )
-
-        final_display = html.Div([
-            main_message,
-            html.Hr(),
-            html.H6("Detailed Analysis:", className="mt-3 mb-2"),
-            html.Div(detailed_results)
-        ])
-
         return (
-            final_display,
+            main_message,
             overall_status,
             html.Small("Analysis complete!", className="text-success"),
             results,
@@ -1152,7 +1128,7 @@ def run_disease_detection(n_clicks, data, metadata, downsample_factor):
             None,
             True
         )
-
+        
 @callback(
     Output("analyze-btn", "disabled", allow_duplicate=True),
     Input("eeg-data-store", "data"),

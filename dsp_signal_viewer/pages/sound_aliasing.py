@@ -488,9 +488,10 @@ def create_comparison_plot(original_data, antialiased_data, sr, title="Signal Co
      Output('original-audio-store', 'children'),
      Output('waveform-graph', 'figure'),
      Output('comparison-graph', 'figure'),
-     Output('sample-rate-info', 'children')],
+     Output('sample-rate-info', 'children', allow_duplicate=True)],
     Input('upload-audio', 'contents'),
-    State('upload-audio', 'filename')
+    State('upload-audio', 'filename'), 
+    prevent_initial_call=True
 )
 def upload_audio(contents, filename):
     if contents is None:
