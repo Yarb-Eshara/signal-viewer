@@ -15,11 +15,16 @@ import tempfile
 import os
 import torch
 from transformers import AutoModelForAudioClassification, AutoFeatureExtractor
-from voicefixer import VoiceFixer as VoiceFixerModel
-import torchaudio
-from transformers import AutoModelForAudioClassification, AutoFeatureExtractor
 
-VOICEFIXER_AVAILABLE = True
+try:
+    from voicefixer import VoiceFixer as VoiceFixerModel
+
+    VOICEFIXER_AVAILABLE = True
+except ImportError:
+    VOICEFIXER_AVAILABLE = False
+    VoiceFixerModel = None
+import torchaudio
+
 VOICEFIXER_MODEL = None
 GENDER_MODEL = None
 GENDER_FEATURE_EXTRACTOR = None
@@ -77,10 +82,8 @@ def classify_gender(audio_data, sr):
     """Classify gender from audio using the trained model"""
     try:
         if GENDER_MODEL is None or GENDER_FEATURE_EXTRACTOR is None:
-            load_gender_model()
-
-        if GENDER_MODEL is None or GENDER_FEATURE_EXTRACTOR is None:
-            return None, 0.0, "Model not loaded"
+            if not load_gender_model():
+                return None, 0.0, "Failed to load model"
 
         # Convert numpy array to tensor if needed
         if isinstance(audio_data, np.ndarray):
@@ -128,6 +131,7 @@ def classify_gender(audio_data, sr):
         return None, 0.0, f"Error: {str(e)}"
 
 
+# Define the layout
 layout = dbc.Container(
     [
         html.H1("Sound Aliasing & Anti-Aliasing Demo", className="text-center my-4"),
@@ -151,7 +155,7 @@ layout = dbc.Container(
                                 [
                                     html.H5("Step 1: Upload Audio", className="card-title"),
                                     dcc.Upload(
-                                        id='upload-audio',
+                                        id='upload-audio-aliasing',
                                         children=html.Div([
                                             html.I(className="bi bi-cloud-upload me-2"),
                                             'Drag and Drop or Click to Select Audio File'
@@ -168,7 +172,7 @@ layout = dbc.Container(
                                         },
                                         multiple=False
                                     ),
-                                    html.Div(id='upload-status', className="mt-2"),
+                                    html.Div(id='upload-status-aliasing', className="mt-2"),
                                 ]
                             )
                         ),
@@ -190,7 +194,7 @@ layout = dbc.Container(
                                     html.H5("Step 2: Downsample Audio", className="card-title"),
                                     html.Label("Downsampling Factor:", className="mt-3"),
                                     dcc.Slider(
-                                        id="downsample-slider",
+                                        id="downsample-slider-aliasing",
                                         min=1,
                                         max=16,
                                         step=1,
@@ -198,26 +202,26 @@ layout = dbc.Container(
                                         marks={i: f'{i}x' for i in [1, 2, 4, 8, 16]},
                                         tooltip={"placement": "bottom", "always_visible": True}
                                     ),
-                                    html.Div(id="sample-rate-info", className="mt-3 text-muted"),
+                                    html.Div(id="sample-rate-info-aliasing", className="mt-3 text-muted"),
                                     html.Hr(),
                                     html.Label("Playback Controls:", className="mt-2"),
                                     dbc.ButtonGroup(
                                         [
-                                            dbc.Button("Play Original", id="play-original-btn",
+                                            dbc.Button("Play Original", id="play-original-btn-aliasing",
                                                        color="primary", className="me-2"),
-                                            dbc.Button("Play Downsampled", id="play-downsampled-btn",
+                                            dbc.Button("Play Downsampled", id="play-downsampled-btn-aliasing",
                                                        color="warning", className="me-2"),
-                                            dbc.Button("Play Anti-Aliased", id="play-antialiased-btn",
+                                            dbc.Button("Play Anti-Aliased", id="play-antialiased-btn-aliasing",
                                                        color="success", disabled=not VOICEFIXER_AVAILABLE),
                                         ],
                                         className="mt-2"
                                     ),
-                                    html.Audio(id='audio-player', controls=True, className="w-100 mt-3"),
+                                    html.Audio(id='audio-player-aliasing', controls=True, className="w-100 mt-3"),
                                     html.Hr(),
                                     html.Label("Step 3: Apply Anti-Aliasing:", className="mt-2"),
                                     html.Label("VoiceFixer Mode:", className="mt-2"),
                                     dcc.Dropdown(
-                                        id="voicefixer-mode",
+                                        id="voicefixer-mode-aliasing",
                                         options=[
                                             {'label': 'Mode 0: Basic restoration', 'value': 0},
                                             {'label': 'Mode 1: Mild enhancement', 'value': 1},
@@ -233,24 +237,24 @@ layout = dbc.Container(
                                             {"label": "Normalize before processing", "value": "normalize"},
                                         ],
                                         value=["normalize"],
-                                        id="preprocessing-options",
+                                        id="preprocessing-options-aliasing",
                                         className="mb-2"
                                     ),
-                                    dbc.Button("Apply VoiceFixer", id="apply-voicefixer-btn",
+                                    dbc.Button("Apply VoiceFixer", id="apply-voicefixer-btn-aliasing",
                                                color="success", className="w-100 mt-2",
                                                disabled=not VOICEFIXER_AVAILABLE),
-                                    html.Div(id="voicefixer-status", className="mt-2"),
+                                    html.Div(id="voicefixer-status-aliasing", className="mt-2"),
                                     html.Hr(),
                                     html.Label("Step 4: Gender Classification:", className="mt-2"),
                                     dbc.Row(
                                         [
                                             dbc.Col(
-                                                dbc.Button("Predict Original", id="predict-original-btn",
+                                                dbc.Button("Predict Original", id="predict-original-btn-aliasing",
                                                            color="info", className="w-100", size="sm"),
                                                 width=6, className="mb-2"
                                             ),
                                             dbc.Col(
-                                                dbc.Button("Predict Downsampled", id="predict-downsampled-btn",
+                                                dbc.Button("Predict Downsampled", id="predict-downsampled-btn-aliasing",
                                                            color="warning", className="w-100", size="sm"),
                                                 width=6, className="mb-2"
                                             ),
@@ -259,18 +263,19 @@ layout = dbc.Container(
                                     dbc.Row(
                                         [
                                             dbc.Col(
-                                                dbc.Button("Predict Anti-Aliased", id="predict-antialiased-btn",
+                                                dbc.Button("Predict Anti-Aliased",
+                                                           id="predict-antialiased-btn-aliasing",
                                                            color="success", className="w-100", size="sm",
                                                            disabled=not VOICEFIXER_AVAILABLE),
                                                 width=12, className="mb-2"
                                             ),
                                         ]
                                     ),
-                                    html.Div(id="gender-predictions", className="mt-3"),
+                                    html.Div(id="gender-predictions-aliasing", className="mt-3"),
                                     html.Hr(),
-                                    dbc.Button("Download Processed Audio", id="download-btn",
+                                    dbc.Button("Download Processed Audio", id="download-btn-aliasing",
                                                color="info", className="w-100 mt-2"),
-                                    dcc.Download(id="download-audio"),
+                                    dcc.Download(id="download-audio-aliasing"),
                                 ]
                             )
                         ),
@@ -283,7 +288,7 @@ layout = dbc.Container(
                             dbc.CardBody(
                                 [
                                     html.H5("Waveform Visualization", className="card-title"),
-                                    dcc.Graph(id="waveform-graph", style={'height': '400px'}),
+                                    dcc.Graph(id="waveform-graph-aliasing", style={'height': '400px'}),
                                 ]
                             )
                         ),
@@ -293,7 +298,7 @@ layout = dbc.Container(
                                     html.H5("Signal Comparison: Original vs Anti-Aliased", className="card-title"),
                                     html.P("Green = Similar | Yellow = Moderate | Red = Different",
                                            className="text-muted small"),
-                                    dcc.Graph(id="comparison-graph", style={'height': '400px'}),
+                                    dcc.Graph(id="comparison-graph-aliasing", style={'height': '400px'}),
                                 ]
                             ),
                             className="mt-3"
@@ -302,7 +307,7 @@ layout = dbc.Container(
                             dbc.CardBody(
                                 [
                                     html.H5("Similarity Metrics", className="card-title"),
-                                    html.Div(id="metrics-display", className="mt-2"),
+                                    html.Div(id="metrics-display-aliasing", className="mt-2"),
                                 ]
                             ),
                             className="mt-3"
@@ -313,10 +318,13 @@ layout = dbc.Container(
             ]
         ),
 
-        # Hidden divs to store audio data
-        html.Div(id='original-audio-store', style={'display': 'none'}),
-        html.Div(id='downsampled-audio-store', style={'display': 'none'}),
-        html.Div(id='antialiased-audio-store', style={'display': 'none'}),
+        # Hidden divs to store audio data - FIXED: Make sure these exist with unique names
+        html.Div(id='original-audio-store-aliasing', style={'display': 'none'}),
+        html.Div(id='downsampled-audio-store-aliasing', style={'display': 'none'}),
+        html.Div(id='antialiased-audio-store-aliasing', style={'display': 'none'}),
+
+        # Add a dummy div to store initial state
+        html.Div(id='dummy-store-aliasing', style={'display': 'none'}),
     ],
     fluid=True,
 )
@@ -401,15 +409,6 @@ def create_comparison_plot(original_data, antialiased_data, sr, title="Signal Co
 
     diff_normalized = difference / (np.max(difference) + 1e-10)
 
-    colors = []
-    for d in diff_normalized:
-        if d < 0.2:
-            colors.append(f'rgba(0, 255, 0, 0.7)')
-        elif d < 0.5:
-            colors.append(f'rgba(255, 255, 0, 0.7)')
-        else:
-            colors.append(f'rgba(255, 0, 0, 0.7)')
-
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
@@ -482,15 +481,15 @@ def create_comparison_plot(original_data, antialiased_data, sr, title="Signal Co
     return fig
 
 
-# Callbacks
+# Callbacks - FIXED: Updated all IDs to match the layout
 @callback(
-    [Output('upload-status', 'children'),
-     Output('original-audio-store', 'children'),
-     Output('waveform-graph', 'figure'),
-     Output('comparison-graph', 'figure'),
-     Output('sample-rate-info', 'children', allow_duplicate=True)],
-    Input('upload-audio', 'contents'),
-    State('upload-audio', 'filename'), 
+    [Output('upload-status-aliasing', 'children', allow_duplicate=True),
+     Output('original-audio-store-aliasing', 'children'),
+     Output('waveform-graph-aliasing', 'figure'),
+     Output('comparison-graph-aliasing', 'figure'),
+     Output('sample-rate-info-aliasing', 'children', allow_duplicate=True)],
+    Input('upload-audio-aliasing', 'contents'),
+    State('upload-audio-aliasing', 'filename'),
     prevent_initial_call=True
 )
 def upload_audio(contents, filename):
@@ -524,11 +523,11 @@ def upload_audio(contents, filename):
 
 
 @callback(
-    [Output('downsampled-audio-store', 'children'),
-     Output('waveform-graph', 'figure', allow_duplicate=True),
-     Output('sample-rate-info', 'children', allow_duplicate=True)],
-    Input('downsample-slider', 'value'),
-    State('original-audio-store', 'children'),
+    [Output('downsampled-audio-store-aliasing', 'children'),
+     Output('waveform-graph-aliasing', 'figure', allow_duplicate=True),
+     Output('sample-rate-info-aliasing', 'children', allow_duplicate=True)],
+    Input('downsample-slider-aliasing', 'value'),
+    State('original-audio-store-aliasing', 'children'),
     prevent_initial_call=True
 )
 def update_downsample(factor, audio_store_str):
@@ -542,15 +541,15 @@ def update_downsample(factor, audio_store_str):
         sr = audio_store['sr']
 
         downsampled, new_sr = downsample_audio(audio_data, sr, factor)
-        upsampled = signal.resample(downsampled, len(audio_data))
+        # upsampled = signal.resample(downsampled, len(audio_data))
 
         ds_store = {
             'data': downsampled.tolist(),
             'sr': new_sr,
-            'upsampled': upsampled.tolist()
+            # 'upsampled': upsampled.tolist()
         }
 
-        waveform_fig = create_waveform_plot(upsampled, sr, f"Downsampled Waveform ({factor}x)")
+        waveform_fig = create_waveform_plot(downsampled, sr, f"Downsampled Waveform ({factor}x)")
         info = f"Original SR: {sr} Hz | Downsampled SR: {new_sr} Hz | Factor: {factor}x"
 
         return str(ds_store), waveform_fig, info
@@ -560,13 +559,13 @@ def update_downsample(factor, audio_store_str):
 
 
 @callback(
-    Output('audio-player', 'src'),
-    [Input('play-original-btn', 'n_clicks'),
-     Input('play-downsampled-btn', 'n_clicks'),
-     Input('play-antialiased-btn', 'n_clicks')],
-    [State('original-audio-store', 'children'),
-     State('downsampled-audio-store', 'children'),
-     State('antialiased-audio-store', 'children')],
+    Output('audio-player-aliasing', 'src'),
+    [Input('play-original-btn-aliasing', 'n_clicks'),
+     Input('play-downsampled-btn-aliasing', 'n_clicks'),
+     Input('play-antialiased-btn-aliasing', 'n_clicks')],
+    [State('original-audio-store-aliasing', 'children'),
+     State('downsampled-audio-store-aliasing', 'children'),
+     State('antialiased-audio-store-aliasing', 'children')],
     prevent_initial_call=True
 )
 def play_audio(play_orig, play_ds, play_aa, orig_store, ds_store, aa_store):
@@ -577,19 +576,19 @@ def play_audio(play_orig, play_ds, play_aa, orig_store, ds_store, aa_store):
     button_id = ctx.triggered[0]['prop_id'].split('.')[0]
 
     try:
-        if button_id == 'play-original-btn' and orig_store:
+        if button_id == 'play-original-btn-aliasing' and orig_store:
             store = eval(orig_store)
             audio_data = np.array(store['data'])
             sr = store['sr']
             return audio_to_base64(audio_data, sr)
 
-        elif button_id == 'play-downsampled-btn' and ds_store:
+        elif button_id == 'play-downsampled-btn-aliasing' and ds_store:
             store = eval(ds_store)
             audio_data = np.array(store['upsampled'])
             sr = eval(orig_store)['sr']
             return audio_to_base64(audio_data, sr)
 
-        elif button_id == 'play-antialiased-btn' and aa_store:
+        elif button_id == 'play-antialiased-btn-aliasing' and aa_store:
             store = eval(aa_store)
             audio_data = np.array(store['data'])
             sr = store['sr']
@@ -601,15 +600,15 @@ def play_audio(play_orig, play_ds, play_aa, orig_store, ds_store, aa_store):
 
 
 @callback(
-    [Output('antialiased-audio-store', 'children'),
-     Output('voicefixer-status', 'children'),
-     Output('comparison-graph', 'figure', allow_duplicate=True),
-     Output('metrics-display', 'children')],
-    Input('apply-voicefixer-btn', 'n_clicks'),
-    [State('downsampled-audio-store', 'children'),
-     State('original-audio-store', 'children'),
-     State('voicefixer-mode', 'value'),
-     State('preprocessing-options', 'value')],
+    [Output('antialiased-audio-store-aliasing', 'children'),
+     Output('voicefixer-status-aliasing', 'children'),
+     Output('comparison-graph-aliasing', 'figure', allow_duplicate=True),
+     Output('metrics-display-aliasing', 'children')],
+    Input('apply-voicefixer-btn-aliasing', 'n_clicks'),
+    [State('downsampled-audio-store-aliasing', 'children'),
+     State('original-audio-store-aliasing', 'children'),
+     State('voicefixer-mode-aliasing', 'value'),
+     State('preprocessing-options-aliasing', 'value')],
     prevent_initial_call=True
 )
 def apply_voicefixer(n_clicks, ds_store, orig_store, vf_mode, preprocess_opts):
@@ -773,13 +772,13 @@ def apply_voicefixer(n_clicks, ds_store, orig_store, vf_mode, preprocess_opts):
 
 
 @callback(
-    Output('gender-predictions', 'children'),
-    [Input('predict-original-btn', 'n_clicks'),
-     Input('predict-downsampled-btn', 'n_clicks'),
-     Input('predict-antialiased-btn', 'n_clicks')],
-    [State('original-audio-store', 'children'),
-     State('downsampled-audio-store', 'children'),
-     State('antialiased-audio-store', 'children')],
+    Output('gender-predictions-aliasing', 'children'),
+    [Input('predict-original-btn-aliasing', 'n_clicks'),
+     Input('predict-downsampled-btn-aliasing', 'n_clicks'),
+     Input('predict-antialiased-btn-aliasing', 'n_clicks')],
+    [State('original-audio-store-aliasing', 'children'),
+     State('downsampled-audio-store-aliasing', 'children'),
+     State('antialiased-audio-store-aliasing', 'children')],
     prevent_initial_call=True
 )
 def predict_gender(pred_orig, pred_ds, pred_aa, orig_store, ds_store, aa_store):
@@ -792,7 +791,8 @@ def predict_gender(pred_orig, pred_ds, pred_aa, orig_store, ds_store, aa_store):
 
     try:
         # Original audio prediction
-        if button_id == 'predict-original-btn' or button_id in ['predict-downsampled-btn', 'predict-antialiased-btn']:
+        if button_id == 'predict-original-btn-aliasing' or button_id in ['predict-downsampled-btn-aliasing',
+                                                                         'predict-antialiased-btn-aliasing']:
             if orig_store:
                 store = eval(orig_store)
                 audio_data = np.array(store['data'])
@@ -806,7 +806,7 @@ def predict_gender(pred_orig, pred_ds, pred_aa, orig_store, ds_store, aa_store):
                             html.Div([
                                 html.Strong("Gender: "),
                                 html.Span(gender if gender else "Unknown",
-                                          className=f"badge badge-{'primary' if gender == 'Male' else 'danger'}")
+                                          className=f"badge bg-{'primary' if gender == 'Male' else 'danger'}")
                             ], className="mb-2"),
                             html.Div([
                                 html.Strong("Confidence: "),
@@ -819,7 +819,8 @@ def predict_gender(pred_orig, pred_ds, pred_aa, orig_store, ds_store, aa_store):
                 )
 
         # Downsampled audio prediction
-        if button_id == 'predict-downsampled-btn' or button_id in ['predict-original-btn', 'predict-antialiased-btn']:
+        if button_id == 'predict-downsampled-btn-aliasing' or button_id in ['predict-original-btn-aliasing',
+                                                                            'predict-antialiased-btn-aliasing']:
             if ds_store:
                 store = eval(ds_store)
                 # Use the original downsampled data (not upsampled)
@@ -834,7 +835,7 @@ def predict_gender(pred_orig, pred_ds, pred_aa, orig_store, ds_store, aa_store):
                             html.Div([
                                 html.Strong("Gender: "),
                                 html.Span(gender if gender else "Unknown",
-                                          className=f"badge badge-{'primary' if gender == 'Male' else 'danger'}")
+                                          className=f"badge bg-{'primary' if gender == 'Male' else 'danger'}")
                             ], className="mb-2"),
                             html.Div([
                                 html.Strong("Confidence: "),
@@ -847,7 +848,7 @@ def predict_gender(pred_orig, pred_ds, pred_aa, orig_store, ds_store, aa_store):
                 )
 
         # Anti-aliased audio prediction
-        if button_id == 'predict-antialiased-btn':
+        if button_id == 'predict-antialiased-btn-aliasing':
             if aa_store:
                 store = eval(aa_store)
                 audio_data = np.array(store['data'])
@@ -861,7 +862,7 @@ def predict_gender(pred_orig, pred_ds, pred_aa, orig_store, ds_store, aa_store):
                             html.Div([
                                 html.Strong("Gender: "),
                                 html.Span(gender if gender else "Unknown",
-                                          className=f"badge badge-{'primary' if gender == 'Male' else 'danger'}")
+                                          className=f"badge bg-{'primary' if gender == 'Male' else 'danger'}")
                             ], className="mb-2"),
                             html.Div([
                                 html.Strong("Confidence: "),
@@ -886,9 +887,9 @@ def predict_gender(pred_orig, pred_ds, pred_aa, orig_store, ds_store, aa_store):
 
 
 @callback(
-    Output('download-audio', 'data'),
-    Input('download-btn', 'n_clicks'),
-    State('antialiased-audio-store', 'children'),
+    Output('download-audio-aliasing', 'data'),
+    Input('download-btn-aliasing', 'n_clicks'),
+    State('antialiased-audio-store-aliasing', 'children'),
     prevent_initial_call=True
 )
 def download_audio(n_clicks, aa_store):
@@ -908,3 +909,19 @@ def download_audio(n_clicks, aa_store):
     except Exception as e:
         print(f"Error downloading: {e}")
         return dash.no_update
+
+
+# Initialize models on page load
+@callback(
+    Output('dummy-store-aliasing', 'children'),
+    Input('dummy-store-aliasing', 'id')
+)
+def initialize_models(_):
+    # Pre-load models in background
+    if GENDER_MODEL is None:
+        load_gender_model()
+
+    if VOICEFIXER_AVAILABLE and VOICEFIXER_MODEL is None:
+        load_voicefixer()
+
+    return ""

@@ -229,7 +229,7 @@ def handle_upload(contents, remove_clicks, filename):
 
 @dash.callback(
     Output("audio-play", "src", allow_duplicate=True),
-    Output("waveform-plot", "figure"),
+    Output("waveform-plot", "figure", allow_duplicate=True),
     Output("sample-rate", "children"),  # FIXED: Added allow_duplicate=True
     Input("downsample-slider", "value"),
     State("original-audio-data", "data"),
@@ -318,7 +318,7 @@ def handle_predict(n_clicks, target_sr, original_file_path):
         fig.update_layout(
             title=f"Prediction Confidence (Sample Rate: {target_sr} Hz)",
             yaxis=dict(title="Probability", range=[0, 1]),
-            xaxis=dict(title="Labels"),
+            # xaxis=dict(title="Labels"),
             plot_bgcolor='#1e2130',
             paper_bgcolor='#1e2130',
             font=dict(color='white')

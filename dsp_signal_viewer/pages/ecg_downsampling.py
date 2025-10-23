@@ -20,7 +20,7 @@ dash.register_page(__name__, path="/ecg-downsampling", name="ECG Down Sampling")
 # --- Parameters ---
 WINDOW_SIZE = 2500
 STEP = 250
-FS = 250
+FS = 500
 DOWNSAMPLE = 4
 ECG_LEADS = ["i", "ii", "iii", "avr", "avl", "avf",
              "v1", "v2", "v3", "v4", "v5", "v6"]
@@ -32,26 +32,27 @@ INACTIVE_STYLE = {"backgroundColor": "#3E9AAB", "borderColor": "#3E9AAB", "color
 # --- Load model ---
 BASE_DIR = Path(__file__).resolve().parents[2]
 MODEL_PATH = os.path.join(BASE_DIR, "models", "model.hdf5")
+
 model = load_model(MODEL_PATH, compile=False)
 ABNORMALITIES = ["1dAVb", "RBBB", "LBBB", "SB", "AF", "ST"]
 THRESHOLD = 0.3
 
-# Downsampling options - FIXED: Only standard Dropdown format
+# Downsampling options - Updated for 500 Hz original
 DOWNSAMPLING_OPTIONS = [
-    {"label": "Original (250 Hz)", "value": "1"},
-    {"label": "2x Downsample (125 Hz)", "value": "2"},
-    {"label": "4x Downsample (62.5 Hz)", "value": "4"},
-    {"label": "8x Downsample (31.25 Hz)", "value": "8"},
-    {"label": "16x Downsample (15.625 Hz)", "value": "16"},
+    {"label": "Original (500 Hz)", "value": "1"},
+    {"label": "2x Downsample (250 Hz)", "value": "2"},
+    {"label": "4x Downsample (125 Hz)", "value": "4"},
+    {"label": "8x Downsample (62.5 Hz)", "value": "8"},
+    {"label": "16x Downsample (31.25 Hz)", "value": "16"},
 ]
 
-# Nyquist rates mapping
+# Nyquist rates mapping - Updated for 500 Hz original
 NYQUIST_RATES = {
-    "1": 125,
-    "2": 62.5,
-    "4": 31.25,
-    "8": 15.625,
-    "16": 7.8125
+    "1": 250,
+    "2": 125,
+    "4": 62.5,
+    "8": 31.25,
+    "16": 15.625
 }
 
 # --- Layout ---
@@ -121,13 +122,15 @@ layout = dbc.Container([
                         "padding": "0 15px"
                     }
                 ),
-                html.Div(id="timer-display-downsample", style={"fontWeight": "bold", "marginTop": "5px", "textAlign": "center"})
+                html.Div(id="timer-display-downsample",
+                         style={"fontWeight": "bold", "marginTop": "5px", "textAlign": "center"})
             ], style={"display": "flex", "flexDirection": "column", "alignItems": "center"})
         ], width=2),
 
         # Predict button + prediction text
         dbc.Col([
-            dbc.Button("Predict ECG", id="predict-btn-downsample", color="primary", n_clicks=0, style={"marginRight": "10px"}),
+            dbc.Button("Predict ECG", id="predict-btn-downsample", color="primary", n_clicks=0,
+                       style={"marginRight": "10px"}),
             html.Div(id="ecg-prediction-output-downsample", style={
                 "fontWeight": "bold", "fontSize": "16px", "display": "inline-block"
             })
@@ -160,6 +163,7 @@ layout = dbc.Container([
 app = dash.get_app()
 app.config.suppress_callback_exceptions = True
 
+
 # --- Update Nyquist display ---
 @dash.callback(
     Output("nyquist-display", "children"),
@@ -173,6 +177,7 @@ def update_nyquist_display(downsample_factor):
     # Get nyquist rate from mapping
     nyquist = NYQUIST_RATES.get(downsample_factor, nyquist_rate)
     return f"Nyquist: {nyquist} Hz"
+
 
 # --- Update Nyquist information alert ---
 @dash.callback(
@@ -226,6 +231,7 @@ def update_nyquist_info(downsample_factor, prediction_result):
 
     return " | ".join(info_parts)
 
+
 # --- Run prediction on button click ---
 @dash.callback(
     Output("ecg-prediction-output-downsample", "children"),
@@ -258,6 +264,7 @@ def predict_ecg(n_clicks, data_json, selected_channels, downsample_factor):
         error_text = f"⚠️ Prediction failed: {e}"
         return error_text, "error"
 
+
 # --- Helper: Apply downsampling to ECG data ---
 def apply_downsampling(df, downsample_factor):
     """Apply downsampling to all channels in the DataFrame"""
@@ -273,11 +280,12 @@ def apply_downsampling(df, downsample_factor):
 
     return pd.DataFrame(downsampled_data)
 
+
 # --- Helper: Run ECG model prediction ---
 def run_ecg_prediction(df):
     # Ensure all 12 leads exist
-    lead_map = {"i":"I","ii":"II","iii":"III","avr":"AVR","avl":"AVL","avf":"AVF",
-                "v1":"V1","v2":"V2","v3":"V3","v4":"V4","v5":"V5","v6":"V6"}
+    lead_map = {"i": "I", "ii": "II", "iii": "III", "avr": "AVR", "avl": "AVL", "avf": "AVF",
+                "v1": "V1", "v2": "V2", "v3": "V3", "v4": "V4", "v5": "V5", "v6": "V6"}
     df_model = pd.DataFrame()
     for ch in lead_map:
         df_model[lead_map[ch]] = df[ch] if ch in df.columns else 0.0
@@ -303,6 +311,7 @@ def run_ecg_prediction(df):
     else:
         diseases = [ab for ab, _ in detected]
         return f" Abnormal: Detected conditions → {', '.join(diseases)}", False
+
 
 # --- CSV Upload callback ---
 @dash.callback(
@@ -334,6 +343,7 @@ def load_csv(contents, filename):
     options = [{"label": ch.upper(), "value": ch} for ch in available]
     return df.to_json(date_format="iso", orient="split"), options, available, 0
 
+
 # --- Start/Stop toggle ---
 @dash.callback(
     Output("is-running-downsample", "data"),
@@ -355,6 +365,7 @@ def toggle_run(n_clicks, is_running, start_time):
         style = {"backgroundColor": "#3E9AAB", "borderColor": "#3E9AAB", "color": "white",
                  "height": "38px", "padding": "0 15px", "marginTop": "5px", "display": "block"}
         return False, True, "▶ Start", style, start_time
+
 
 # --- Helper: Get looping data ---
 def get_looping_data(df, current_position, window_size, step):
@@ -388,6 +399,7 @@ def get_looping_data(df, current_position, window_size, step):
 
     return data_slice, new_position
 
+
 # --- Combined callback for timer and graph updates ---
 @dash.callback(
     Output("ecg-graph-downsample", "figure"),
@@ -404,8 +416,7 @@ def get_looping_data(df, current_position, window_size, step):
     prevent_initial_call=True
 )
 def update_graph_and_timer(n_intervals, upload_contents, downsample_factor, selected_channels,
-                          start_time, is_running, data_json, current_position):
-
+                           start_time, is_running, data_json, current_position):
     # Use callback context to determine which input triggered the callback
     ctx = dash.callback_context
     triggered_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
@@ -445,7 +456,8 @@ def update_graph_and_timer(n_intervals, upload_contents, downsample_factor, sele
     # Only update position if the interval triggered the callback and is running
     if triggered_id == "interval-downsample" and is_running:
         # Get data with looping and update position
-        data_slice, new_position = get_looping_data(df, current_position, current_window_size, STEP // downsample_factor_int)
+        data_slice, new_position = get_looping_data(df, current_position, current_window_size,
+                                                    STEP // downsample_factor_int)
         current_position = new_position
     else:
         # For other triggers (like upload or parameter changes), just get current data without updating position
@@ -466,12 +478,12 @@ def update_graph_and_timer(n_intervals, upload_contents, downsample_factor, sele
             go.Scatter(x=x, y=y, mode="lines",
                        line=dict(color="blue", width=line_width),
                        name=ch.upper(), showlegend=False),
-            row=i+1, col=1
+            row=i + 1, col=1
         )
 
     for i in range(len(selected_channels)):
-        fig.update_xaxes(row=i+1, col=1, tickfont=dict(size=9, color="black"))
-        fig.update_yaxes(row=i+1, col=1, tickfont=dict(size=9, color="black"),
+        fig.update_xaxes(row=i + 1, col=1, tickfont=dict(size=9, color="black"))
+        fig.update_yaxes(row=i + 1, col=1, tickfont=dict(size=9, color="black"),
                          title_standoff=50)
 
     # Get current downsampling option for display
