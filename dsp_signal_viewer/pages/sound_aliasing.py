@@ -1,5 +1,4 @@
 from pathlib import Path
-
 import dash
 import dash_bootstrap_components as dbc
 from dash import html, dcc, Input, Output, State, callback
@@ -541,15 +540,15 @@ def update_downsample(factor, audio_store_str):
         sr = audio_store['sr']
 
         downsampled, new_sr = downsample_audio(audio_data, sr, factor)
-        # upsampled = signal.resample(downsampled, len(audio_data))
+        upsampled = signal.resample(downsampled, len(audio_data))
 
         ds_store = {
             'data': downsampled.tolist(),
             'sr': new_sr,
-            # 'upsampled': upsampled.tolist()
+            'upsampled': upsampled.tolist()
         }
 
-        waveform_fig = create_waveform_plot(downsampled, sr, f"Downsampled Waveform ({factor}x)")
+        waveform_fig = create_waveform_plot(upsampled, sr, f"Downsampled Waveform ({factor}x)")
         info = f"Original SR: {sr} Hz | Downsampled SR: {new_sr} Hz | Factor: {factor}x"
 
         return str(ds_store), waveform_fig, info

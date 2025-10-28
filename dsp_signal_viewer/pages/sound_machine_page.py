@@ -279,7 +279,8 @@ def handle_predict(n_clicks, target_sr, original_file_path):
         # Downsample to the selected rate first
         waveform, sr = downsample_audio(original_file_path, target_sr)
         
-        # Resample to 16kHz for the model (simulating the effect of low sample rate)
+        # Resample to 16kHz for the model (si
+        # mulating the effect of low sample rate)
         if sr != 16000:
             waveform = librosa.resample(waveform, orig_sr=sr, target_sr=16000)
         

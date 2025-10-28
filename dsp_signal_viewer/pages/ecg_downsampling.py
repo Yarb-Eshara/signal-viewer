@@ -1,6 +1,3 @@
-import os
-from pathlib import Path
-
 import dash
 from dash import html, dcc, Input, Output, State
 import dash_bootstrap_components as dbc
@@ -30,21 +27,10 @@ ACTIVE_STYLE = {"backgroundColor": "#2c7f91", "borderColor": "#2c7f91", "color":
 INACTIVE_STYLE = {"backgroundColor": "#3E9AAB", "borderColor": "#3E9AAB", "color": "white", "marginRight": "10px"}
 
 # --- Load model ---
-BASE_DIR = Path(__file__).resolve().parents[2]
-MODEL_PATH = os.path.join(BASE_DIR, "models", "model.hdf5")
-
+MODEL_PATH = r"models\model.hdf5"
 model = load_model(MODEL_PATH, compile=False)
 ABNORMALITIES = ["1dAVb", "RBBB", "LBBB", "SB", "AF", "ST"]
 THRESHOLD = 0.3
-
-# Downsampling options - Updated for 500 Hz original
-DOWNSAMPLING_OPTIONS = [
-    {"label": "Original (500 Hz)", "value": "1"},
-    {"label": "2x Downsample (250 Hz)", "value": "2"},
-    {"label": "4x Downsample (125 Hz)", "value": "4"},
-    {"label": "8x Downsample (62.5 Hz)", "value": "8"},
-    {"label": "16x Downsample (31.25 Hz)", "value": "16"},
-]
 
 # Nyquist rates mapping - Updated for 500 Hz original
 NYQUIST_RATES = {
@@ -53,6 +39,15 @@ NYQUIST_RATES = {
     "4": 62.5,
     "8": 31.25,
     "16": 15.625
+}
+
+# Slider marks configuration - SIMPLIFIED LABELS
+SLIDER_MARKS = {
+    1: "1x",
+    2: "2x",
+    4: "4x",
+    8: "8x",
+    16: "16x"
 }
 
 # --- Layout ---
@@ -86,25 +81,28 @@ layout = dbc.Container([
                 clearable=False,
                 style={"color": "#182940", "width": "100%"}
             )
-        ], width=4),  # Increased width
+        ], width=4),
 
-        # Downsampling selector
+        # Downsampling selector - SLIDER WITH SIMPLIFIED LABELS
         dbc.Col([
             html.Label("Down Sampling Factor"),
-            dcc.Dropdown(
+            dcc.Slider(
                 id="downsample-select",
-                options=DOWNSAMPLING_OPTIONS,
-                value="1",
-                clearable=False,
-                style={"color": "#182940", "width": "100%"}
+                min=1,
+                max=16,
+                step=None,
+                value=1,
+                marks=SLIDER_MARKS,
+                tooltip={"placement": "bottom", "always_visible": True}
             ),
             html.Div(id="nyquist-display", style={
                 "fontWeight": "bold",
                 "marginTop": "5px",
                 "color": "#3E9AAB",
-                "fontSize": "14px"
+                "fontSize": "14px",
+                "textAlign": "center"
             })
-        ], width=3),
+        ], width=4),
 
         # Start/Stop button with elapsed time
         dbc.Col([
@@ -134,7 +132,7 @@ layout = dbc.Container([
             html.Div(id="ecg-prediction-output-downsample", style={
                 "fontWeight": "bold", "fontSize": "16px", "display": "inline-block"
             })
-        ], width=3)  # Increased width
+        ], width=2)
     ], align="center", className="mb-4"),
 
     # --- Information Display ---
@@ -175,8 +173,8 @@ def update_nyquist_display(downsample_factor):
     nyquist_rate = new_fs / 2
 
     # Get nyquist rate from mapping
-    nyquist = NYQUIST_RATES.get(downsample_factor, nyquist_rate)
-    return f"Nyquist: {nyquist} Hz"
+    nyquist = NYQUIST_RATES.get(str(downsample_factor), nyquist_rate)
+    return f"Sampling: {new_fs} Hz | Nyquist: {nyquist} Hz"
 
 
 # --- Update Nyquist information alert ---
@@ -486,16 +484,15 @@ def update_graph_and_timer(n_intervals, upload_contents, downsample_factor, sele
         fig.update_yaxes(row=i + 1, col=1, tickfont=dict(size=9, color="black"),
                          title_standoff=50)
 
-    # Get current downsampling option for display
-    current_option = next((opt for opt in DOWNSAMPLING_OPTIONS if opt["value"] == downsample_factor), None)
-    sampling_info = current_option["label"] if current_option else f"Downsampled {downsample_factor_int}x"
+    # Get current downsampling info for display
+    sampling_label = SLIDER_MARKS.get(downsample_factor_int, f"Downsampled {downsample_factor_int}x")
 
     fig.update_layout(
         height=250 * len(selected_channels),
         template="plotly_white",
         margin=dict(l=60, r=40, t=100, b=40),
         plot_bgcolor="white", paper_bgcolor="white",
-        title=f"ECG Signal - {sampling_info} | Position: {current_position}/{total_samples} | Effective FS: {current_fs} Hz"
+        title=f"ECG Signal - {sampling_label} | Position: {current_position}/{total_samples} | Effective FS: {current_fs} Hz"
     )
 
     return fig, timer_text, current_position
